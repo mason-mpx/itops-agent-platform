@@ -1,0 +1,53 @@
+# Node modules - 排除所有 node_modules
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Database files (我们使用 volume 持久化，不要打包到镜像)
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# 项目文档和示例，不需要打包进镜像
+blog/
+docs/
+examples/
+assets/
+*.md
+!README.md
+
+# Trae 相关
+.trae/

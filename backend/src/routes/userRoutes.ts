@@ -1,0 +1,160 @@
+import { Router, Request, Response } from 'express';
+import db from '../models/database';
+import { randomUUID } from 'crypto';
+import bcrypt from 'bcryptjs';
+import { createAuditLog } from '../services/auditService';
+import { requireRole } from '../middleware/auth';
+
+const router = Router();
+
+router.use(requireRole('admin', 'operator'));
+
+router.get('/', (_req: Request, res: Response) => {
+  try {
+    const users = db.prepare('SELECT id, username, email, role, enabled, created_at FROM users ORDER BY created_at DESC').all();
+    res.json({ success: true, data: users });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+router.get('/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = db.prepare('SELECT id, username, email, role, enabled, created_at FROM users WHERE id = ?').get(id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    res.json({ success: true, data: user });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const { username, password, email, role = 'viewer' } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: 'Username and password are required' });
+    }
+    
+    const existingUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    if (existingUser) {
+      return res.status(400).json({ success: false, error: 'Username already exists' });
+    }
+    
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    
+    // 使用bcrypt进行密码哈希
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    
+    db.prepare(`
+      INSERT INTO users (id, username, password, email, role, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, username, hashedPassword, email || null, role, now, now);
+    
+    const reqUser = (req as any).user;
+    createAuditLog({
+      user_id: reqUser?.id || 'system',
+      action: 'create_user',
+      resource_type: 'user',
+      resource_id: id,
+      details: JSON.stringify({ username, email, role })
+    });
+    
+    res.status(201).json({ success: true, data: { id, username, email, role } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { username, email, role, enabled, password } = req.body;
+    
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    const updates: string[] = [];
+    const params: any[] = [];
+    
+    if (username) {
+      updates.push('username = ?');
+      params.push(username);
+    }
+    if (email !== undefined) {
+      updates.push('email = ?');
+      params.push(email);
+    }
+    if (role) {
+      updates.push('role = ?');
+      params.push(role);
+    }
+    if (enabled !== undefined) {
+      updates.push('enabled = ?');
+      params.push(enabled ? 1 : 0);
+    }
+    if (password) {
+      const saltRounds = 10;
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+      updates.push('password = ?');
+      params.push(hashedPassword);
+    }
+    
+    if (updates.length > 0) {
+      updates.push('updated_at = ?');
+      params.push(new Date().toISOString(), id);
+      
+      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    }
+    
+    const reqUser = (req as any).user;
+    createAuditLog({
+      user_id: reqUser?.id || 'system',
+      action: 'update_user',
+      resource_type: 'user',
+      resource_id: id,
+      details: JSON.stringify({ username, email, role, enabled })
+    });
+    
+    res.json({ success: true, message: 'User updated' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+router.delete('/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    
+    const reqUser = (req as any).user;
+    createAuditLog({
+      user_id: reqUser?.id || 'system',
+      action: 'delete_user',
+      resource_type: 'user',
+      resource_id: id,
+      details: JSON.stringify({ username: (user as any).username })
+    });
+    
+    res.json({ success: true, message: 'User deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+export default router;
