@@ -1,13 +1,18 @@
-﻿import { Server as SocketIOServer, Socket } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { env } from '../utils/env';
 import { logger } from '../utils/logger';
 import db from '../models/database';
+import { terminalService } from '../services/terminalService';
+import type { User } from '../types';
+
+interface SocketWithUser extends Socket {
+  user?: User;
+}
 
 const taskRooms = new Map<string, Set<string>>();
 
-// WebSocket 认证中间件
-function authenticateSocket(socket: Socket, next: any) {
+function authenticateSocket(socket: Socket, next: (err?: Error) => void) {
   const token = socket.handshake.auth?.token || 
                 socket.handshake.headers?.authorization?.replace('Bearer ', '');
 
@@ -17,32 +22,29 @@ function authenticateSocket(socket: Socket, next: any) {
   }
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as any;
+    const decoded = jwt.verify(token, env.JWT_SECRET) as { id: string };
     
-    // 验证用户是否存在且启用
-    const user = db.prepare('SELECT id, username, email, role, enabled FROM users WHERE id = ?').get(decoded.id) as any;
+    const user = db.prepare('SELECT id, username, email, role, enabled FROM users WHERE id = ?').get(decoded.id) as User | undefined;
     
     if (!user || !user.enabled) {
       logger.error('❌ WebSocket 认证失败: 用户不存在或已禁用');
       return next(new Error('用户不存在或已禁用'));
     }
 
-    // 将用户信息附加到 socket 对象
-    (socket as any).user = user;
+    (socket as SocketWithUser).user = user;
     logger.info(`✅ WebSocket 认证成功: ${user.username}`);
     next();
-  } catch (error) {
+  } catch (error: unknown) {
     logger.error('❌ WebSocket 认证失败:', error);
     return next(new Error('无效的token'));
   }
 }
 
 export function setupWebSocket(io: SocketIOServer) {
-  // 应用认证中间件
   io.use(authenticateSocket);
 
   io.on('connection', (socket: Socket) => {
-    const user = (socket as any).user;
+    const user = (socket as SocketWithUser).user;
     logger.info(`🔌 Client connected: ${socket.id} (User: ${user?.username})`);
 
     socket.on('task:subscribe', (taskId: string) => {
@@ -65,23 +67,79 @@ export function setupWebSocket(io: SocketIOServer) {
       logger.info(`🔔 Client ${socket.id} subscribed to alerts`);
     });
 
+    socket.on('terminal:open', async (data: { serverId: string; cols: number; rows: number }, callback: (result: { sessionId?: string; error?: string }) => void) => {
+      try {
+        const result = await terminalService.createTerminalSession(data.serverId, data.cols, data.rows);
+        
+        if (result.error) {
+          callback({ error: result.error });
+          return;
+        }
+
+        socket.join(`terminal:${result.sessionId}`);
+
+        const shellDataHandler = (shellData: Buffer) => {
+          socket.emit('terminal:data', {
+            sessionId: result.sessionId,
+            data: shellData.toString('utf-8')
+          });
+        };
+
+        result.shell.on('data', shellDataHandler);
+
+        socket.on('terminal:disconnect', () => {
+          result.shell.removeListener('data', shellDataHandler);
+        });
+
+        socket.on(`terminal:close-session:${result.sessionId}`, () => {
+          result.shell.removeListener('data', shellDataHandler);
+        });
+
+        callback({ sessionId: result.sessionId });
+      } catch (err) {
+        callback({ error: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    });
+
+    socket.on('terminal:data', (data: { sessionId: string; data: string }) => {
+      terminalService.sendData(data.sessionId, data.data);
+    });
+
+    socket.on('terminal:resize', (data: { sessionId: string; cols: number; rows: number }) => {
+      terminalService.resizeTerminal(data.sessionId, data.cols, data.rows);
+    });
+
+    socket.on('terminal:close', (data: { sessionId: string }) => {
+      socket.leave(`terminal:${data.sessionId}`);
+      socket.emit(`terminal:close-session:${data.sessionId}`);
+      terminalService.closeTerminalSession(data.sessionId);
+    });
+
     socket.on('disconnect', () => {
       logger.info(`❌ Client disconnected: ${socket.id}`);
       taskRooms.forEach((sockets) => {
         sockets.delete(socket.id);
       });
+      
+      socket.rooms.forEach((room) => {
+        if (room.startsWith('terminal:')) {
+          const sessionId = room.replace('terminal:', '');
+          socket.emit(`terminal:close-session:${sessionId}`);
+          terminalService.closeTerminalSession(sessionId);
+        }
+      });
     });
   });
 }
 
-export function emitToTask(io: SocketIOServer, taskId: string, event: string, data: any) {
+export function emitToTask(io: SocketIOServer, taskId: string, event: string, data: Record<string, unknown>) {
   io.to(`task:${taskId}`).emit(event, { taskId, ...data });
 }
 
-export function emitToAlerts(io: SocketIOServer, event: string, data: any) {
+export function emitToAlerts(io: SocketIOServer, event: string, data: Record<string, unknown>) {
   io.to('alerts').emit(event, data);
 }
 
-export function broadcast(io: SocketIOServer, event: string, data: any) {
+export function broadcast(io: SocketIOServer, event: string, data: Record<string, unknown>) {
   io.emit(event, data);
 }

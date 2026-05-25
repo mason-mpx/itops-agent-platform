@@ -53,28 +53,26 @@ export default function ChatWidget() {
       queryClient.invalidateQueries({ queryKey: ['copilot-conversations'] });
       setInputValue('');
     },
+    onError: () => {
+      alert(`发送消息失败: 未知错误`);
+    },
   });
 
   const createConversationMutation = useMutation({
     mutationFn: async () => {
-      console.log('正在创建新对话...');
       const res = await api.post('/api/copilot/conversations');
-      console.log('新对话创建响应:', res.data);
       return res.data;
     },
     onSuccess: (data) => {
       if (data.success) {
-        console.log('新对话创建成功:', data.data.id);
         setCurrentConversationId(data.data.id);
         queryClient.invalidateQueries({ queryKey: ['copilot-conversations'] });
       } else {
-        console.error('新对话创建失败:', data.error);
         alert(`创建对话失败: ${data.error}`);
       }
     },
-    onError: (error) => {
-      console.error('创建对话出错:', error);
-      alert(`创建对话出错: ${(error as any).message}`);
+    onError: () => {
+      alert(`创建对话出错`);
     },
   });
 
@@ -151,7 +149,6 @@ export default function ChatWidget() {
             <div className="w-32 bg-slate-800 border-r border-slate-700 flex flex-col">
               <button
                 onClick={() => {
-                  console.log('点击了新对话按钮');
                   createConversationMutation.mutate();
                 }}
                 className="m-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-400 text-white text-sm rounded-lg flex items-center justify-center gap-1.5 transition-all"
@@ -207,7 +204,7 @@ export default function ChatWidget() {
                   <div className="grid grid-cols-1 gap-2 w-full">
                     {suggestions?.slice(0, 3).map((suggestion: string, index: number) => (
                       <button
-                        key={index}
+                        key={`${suggestion}-${index}`}
                         onClick={() => {
                           handleSend(suggestion);
                         }}
@@ -224,7 +221,7 @@ export default function ChatWidget() {
                   <div className="flex-1 overflow-y-auto p-4 space-y-3">
                     {currentConversation?.messages?.map((msg: Message, index: number) => (
                       <div
-                        key={index}
+                        key={`${msg.role}-${msg.timestamp.getTime()}-${index}`}
                         className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                       >
                         <div className="flex items-start gap-2 max-w-[85%]">

@@ -58,13 +58,13 @@ router.post('/', async (req: Request, res: Response) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, username, hashedPassword, email || null, role, now, now);
     
-    const reqUser = (req as any).user;
+    const reqUser = (req as { user?: { id: string } }).user;
     createAuditLog({
       user_id: reqUser?.id || 'system',
       action: 'create_user',
       resource_type: 'user',
       resource_id: id,
-      details: JSON.stringify({ username, email, role })
+      details: { username, email, role }
     });
     
     res.status(201).json({ success: true, data: { id, username, email, role } });
@@ -84,7 +84,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
     
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (username) {
       updates.push('username = ?');
@@ -116,13 +116,13 @@ router.put('/:id', async (req: Request, res: Response) => {
       db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
     }
     
-    const reqUser = (req as any).user;
+    const reqUser = (req as { user?: { id: string } }).user;
     createAuditLog({
       user_id: reqUser?.id || 'system',
       action: 'update_user',
       resource_type: 'user',
       resource_id: id,
-      details: JSON.stringify({ username, email, role, enabled })
+      details: { username, email, role, enabled }
     });
     
     res.json({ success: true, message: 'User updated' });
@@ -135,20 +135,20 @@ router.delete('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const user = db.prepare('SELECT username FROM users WHERE id = ?').get(id) as { username: string };
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
     
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
     
-    const reqUser = (req as any).user;
+    const reqUser = (req as { user?: { id: string } }).user;
     createAuditLog({
       user_id: reqUser?.id || 'system',
       action: 'delete_user',
       resource_type: 'user',
       resource_id: id,
-      details: JSON.stringify({ username: (user as any).username })
+      details: { username: user.username }
     });
     
     res.json({ success: true, message: 'User deleted' });

@@ -10,7 +10,7 @@ router.get('/', (req: Request, res: Response) => {
   try {
     const { category, enabled, search } = req.query;
     let query = 'SELECT * FROM agents WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (category) {
       query += ' AND category = ?';
@@ -30,12 +30,12 @@ router.get('/', (req: Request, res: Response) => {
     
     const agents = db.prepare(query).all(...params);
     // 解析tags字段
-    const processedAgents = (agents as any[]).map(agent => ({
+    const processedAgents = (agents as Array<{ id: string; tags?: string; [key: string]: unknown }>).map(agent => ({
       ...agent,
       tags: agent.tags ? JSON.parse(agent.tags) : []
     }));
     res.json({ success: true, data: processedAgents });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch agents' });
   }
 });
@@ -43,10 +43,10 @@ router.get('/', (req: Request, res: Response) => {
 // 获取Agent统计信息
 router.get('/stats/summary', (_req: Request, res: Response) => {
   try {
-    const totalAgents = (db.prepare('SELECT COUNT(*) as count FROM agents').get() as any).count;
-    const enabledAgents = (db.prepare('SELECT COUNT(*) as count FROM agents WHERE enabled = 1').get() as any).count;
-    const presetAgents = (db.prepare('SELECT COUNT(*) as count FROM agents WHERE is_preset = 1').get() as any).count;
-    const totalExecutions = (db.prepare('SELECT COUNT(*) as count FROM agent_executions').get() as any).count;
+    const totalAgents = (db.prepare('SELECT COUNT(*) as count FROM agents').get() as { count: number }).count;
+    const enabledAgents = (db.prepare('SELECT COUNT(*) as count FROM agents WHERE enabled = 1').get() as { count: number }).count;
+    const presetAgents = (db.prepare('SELECT COUNT(*) as count FROM agents WHERE is_preset = 1').get() as { count: number }).count;
+    const totalExecutions = (db.prepare('SELECT COUNT(*) as count FROM agent_executions').get() as { count: number }).count;
     
     // 获取分类统计
     const categoryStats = db.prepare(`
@@ -66,7 +66,7 @@ router.get('/stats/summary', (_req: Request, res: Response) => {
         categoryStats
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch agent stats' });
   }
 });
@@ -77,9 +77,9 @@ router.get('/:id', (req: Request, res: Response) => {
     if (!agent) {
       return res.status(404).json({ success: false, error: 'Agent not found' });
     }
-    const processedAgent = { ...agent as any, tags: (agent as any).tags ? JSON.parse((agent as any).tags) : [] };
+    const processedAgent = { ...(agent as { id: string; name: string; role: string; tags?: string; [key: string]: unknown }), tags: (agent as { tags?: string })?.tags ? JSON.parse((agent as { tags?: string }).tags!) : [] };
     res.json({ success: true, data: processedAgent });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch agent' });
   }
 });
@@ -89,7 +89,7 @@ router.get('/:id/executions', (req: Request, res: Response) => {
   try {
     const { limit = 20, offset = 0, status } = req.query;
     let query = 'SELECT * FROM agent_executions WHERE agent_id = ?';
-    const params: any[] = [req.params.id];
+    const params: unknown[] = [req.params.id];
     
     if (status) {
       query += ' AND status = ?';
@@ -103,12 +103,12 @@ router.get('/:id/executions', (req: Request, res: Response) => {
     
     // 获取总数
     let countQuery = 'SELECT COUNT(*) as count FROM agent_executions WHERE agent_id = ?';
-    const countParams: any[] = [req.params.id];
+    const countParams: unknown[] = [req.params.id];
     if (status) {
       countQuery += ' AND status = ?';
       countParams.push(status);
     }
-    const totalCount = (db.prepare(countQuery).get(...countParams) as any).count;
+    const totalCount = (db.prepare(countQuery).get(...countParams) as { count: number }).count;
     
     res.json({
       success: true,
@@ -121,7 +121,7 @@ router.get('/:id/executions', (req: Request, res: Response) => {
         }
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch agent executions' });
   }
 });
@@ -150,9 +150,9 @@ router.post('/', (req: Request, res: Response) => {
     );
     
     const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
-    const processedAgent = { ...agent as any, tags: (agent as any).tags ? JSON.parse((agent as any).tags) : [] };
+    const processedAgent = { ...(agent as { id: string; name: string; role: string; tags?: string; [key: string]: unknown }), tags: (agent as { tags?: string })?.tags ? JSON.parse((agent as { tags?: string }).tags!) : [] };
     res.status(201).json({ success: true, data: processedAgent });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to create agent' });
   }
 });
@@ -182,7 +182,7 @@ router.post('/:id/test', async (req: Request, res: Response) => {
     
     const executionId = randomUUID();
     const startTime = Date.now();
-    const agentName = (agent as any).name;
+    const agentName = (agent as { name: string }).name;
     
     let output = '';
     let status = 'success';
@@ -197,10 +197,10 @@ router.post('/:id/test', async (req: Request, res: Response) => {
     try {
       // 检查是否是服务器相关的Agent，如果是，就用增强的执行器
       if (agentName.includes('服务器') || agentName.includes('巡检')) {
-        output = await executeAgentNode((agent as any).id, input, executionContext);
+        output = await executeAgentNode((agent as { id: string }).id, input, executionContext);
       } else {
         // 其他Agent用LLM执行
-        output = await executeAgentWithLLM((agent as any).id, input);
+        output = await executeAgentWithLLM((agent as { id: string }).id, input);
       }
     } catch (error) {
       status = 'error';
@@ -217,7 +217,7 @@ router.post('/:id/test', async (req: Request, res: Response) => {
     `).run(
       executionId,
       req.params.id,
-      (agent as any).name,
+      (agent as { name: string }).name,
       input,
       output,
       status,
@@ -247,7 +247,7 @@ router.post('/:id/test', async (req: Request, res: Response) => {
         }
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to test agent' });
   }
 });
@@ -260,12 +260,12 @@ router.get('/:id/test-input', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Agent not found' });
     }
     
-    const agentName = (agent as any).name;
+    const agentName = (agent as { name: string }).name;
     let testInput = PRESET_TEST_INPUTS[agentName];
     
     // 如果没有预设的测试输入，生成一个通用的
     if (!testInput) {
-      const role = (agent as any).role || '运维助手';
+      const role = (agent as { role?: string }).role || '运维助手';
       testInput = `你好，我是${role}，帮助我处理一个运维相关的问题`;
     }
     
@@ -276,7 +276,7 @@ router.get('/:id/test-input', (req: Request, res: Response) => {
         agentName
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to get test input' });
   }
 });
@@ -301,9 +301,9 @@ router.put('/:id', (req: Request, res: Response) => {
     );
     
     const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id);
-    const processedAgent = { ...agent as any, tags: (agent as any).tags ? JSON.parse((agent as any).tags) : [] };
+    const processedAgent = { ...(agent as { id: string; name: string; role: string; tags?: string; [key: string]: unknown }), tags: (agent as { tags?: string })?.tags ? JSON.parse((agent as { tags?: string }).tags!) : [] };
     res.json({ success: true, data: processedAgent });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to update agent' });
   }
 });
@@ -317,7 +317,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     
     db.prepare('DELETE FROM agents WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Agent deleted successfully' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to delete agent' });
   }
 });
@@ -355,7 +355,7 @@ router.post('/import', (req: Request, res: Response) => {
     }
     
     res.status(201).json({ success: true, data: { importedCount: imported.length, ids: imported } });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to import agents' });
   }
 });
@@ -367,13 +367,13 @@ router.get('/export/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Agent not found' });
     }
     
-    const { id, created_at, updated_at, is_preset, usage_count, last_used_at, ...exportData } = agent as any;
+    const { id: _id, created_at: _created_at, updated_at: _updated_at, is_preset: _is_preset, usage_count: _usage_count, last_used_at: _last_used_at, ...exportData } = agent as { id: string; created_at: string; updated_at: string; is_preset: number; usage_count: number; last_used_at: string; tags?: string; [key: string]: unknown };
     const finalData = {
       ...exportData,
       tags: exportData.tags ? JSON.parse(exportData.tags) : []
     };
     res.json({ success: true, data: finalData });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to export agent' });
   }
 });

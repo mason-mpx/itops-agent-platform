@@ -1,102 +1,97 @@
-# Changelog
+# 变更日志
 
-所有重要的项目变更都会记录在此文件中。
+所有重要的项目变更都将记录在此文件中。
 
-## [v6.0.0] - 2026-05-21
-
-### 容器化与部署
-
-- 新增 Dockerfile 多阶段构建，优化镜像体积和构建速度
-- 新增后端 Dockerfile，使用 node:20-alpine 基础镜像，非 root 用户运行
-- 新增前端 Dockerfile，使用 Nginx 提供静态文件服务
-- 新增健康检查支持，后端使用 HTTP 健康检查端点
-- 新增 OCI 元数据标签到镜像
-
-### 一键部署
-
-- 新增 `deploy.ps1` Windows 一键部署脚本
-- 新增 `deploy.sh` Linux/Mac 一键部署脚本
-- 支持自定义镜像仓库、命名空间、端口、版本
-- 自动检测 Docker 环境、端口可用性、生成 JWT 密钥
-- 自动生成 docker-compose.deploy.yml 部署配置
-
-### 镜像仓库
-
-- 新增 `docker-build-push.ps1` Windows 构建推送脚本
-- 新增 `docker-build-push.sh` Linux/Mac 构建推送脚本
-- 镜像推送到阿里云容器镜像仓库
-- 后端镜像地址: `registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-backend-latest`
-- 前端镜像地址: `registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-frontend-latest`
-
-### CI/CD
-
-- 新增 GitHub Actions 自动化构建和推送工作流
-- 支持 push 到 main/master 分支自动触发构建
-- 支持打 tag 自动构建并推送对应版本镜像
-
-### 文档更新
-
-- 新增 `DEPLOY.md` 快速部署指南
-- 新增 `docker/README.md` 镜像仓库使用说明
-- 更新 `README.md` 快速开始部分，新增一键脚本和阿里云镜像部署说明
-- 更新 `docker-compose.yml` 支持本地构建模式
-- 优化 `.dockerignore` 减少构建上下文大小
-
-## [v5.3.0] - 2026-05-20
-
-### 清理与优化
-
-- 移除预设模拟服务器数据，服务器配置完全由用户手动添加
-- 移除模拟告警生成功能，告警通过 Webhook 或 API 从真实监控系统接收
-- 移除前端「模拟告警」按钮
-- 简化 Agent 测试路由错误处理，移除冗余降级逻辑
-- 清理项目冗余文件和临时调试文件
-- 删除未使用的 assets/ 目录和重复资源
-
-## [v5.2.0] - 2026-05-20
-
-### 架构重构
-
-- 移除所有模拟模式相关代码
-- `mockExecutor.ts` 重命名为 `agentExecutor.ts`
-- 移除降级响应生成逻辑，Agent 必须依赖真实 LLM 和 SSH 执行
-- 未配置 API 密钥时抛出明确错误提示
-
-## [v5.1.0] - 2026-05-20
-
-### 修复和优化
-
-- 修复 AI Copilot 路由认证问题，将 `/api/copilot` 移至认证中间件之前
-- 增强工作流执行报告生成逻辑
-- 优化 Dockerfile，配置国内镜像源加速依赖下载
-- 添加 `start.ps1/start.sh`、`stop.ps1/stop.sh` 一键运维脚本
-- 配置 npm 使用淘宝镜像源
-
-## [v5.0.0] - 2026-05-19
+## [Unreleased]
 
 ### 新增功能
+- **Web SSH 终端** — 基于 xterm.js 的交互式远程终端
+  - 实时双向 WebSocket 通信
+  - 窗口大小自适应同步
+  - VS Code 暗色主题配色
+  - 连接状态可视化（连接中/已连接/错误/断开）
+  - 服务器搜索筛选（按名称/IP/用户名/标签）
+- **主机管理增强** — 企业级服务器分组与批量运维
+  - 多级分组树形结构，支持父子关系
+  - 按分组筛选服务器列表
+  - JSON 批量导入，自动验证 SSH 连通性
+  - 一键采集主机信息（OS/CPU/内存/磁盘/IP）
+  - 服务器卡片展示分组标签和硬件信息
 
-#### 工作流系统
-- 拓扑排序算法优化，按照节点视觉位置排序（y 从上到下，x 从左到右）
-- 执行顺序持久化到数据库
-- 任务执行页面新增「节点结果」标签页
+### Bug 修复
+- 修复 Token 黑名单内存泄漏（Set 改为 Map + TTL 清理）
+- 修复 Copilot 对话内存泄漏（添加 7 天 TTL + 1000 条上限）
+- 修复加密服务空指针异常（activeKey 可能为 undefined）
+- 修复 SSH 连接泄漏（错误路径未调用 conn.end()）
+- 修复 WebSocket 监听器泄漏（terminal:data 重复注册）
+- 修复 WebTerminal 路由切换黑屏问题（useEffect 依赖 + xterm.js 竞争）
+- 修复 Servers 页面 .flatMap() 崩溃（防御性检查 undefined）
+- 提取重复的 API 辅助函数到共享模块（getApiKey/getModelId/getApiBase/buildApiEndpoint）
+- 修复 JWT 类型断言不规范问题
+- 修复 import 语法不统一问题
 
-#### 报告系统
-- 工作流执行自动生成 Markdown 格式报告
-- 任务执行页面新增「相关报告」标签页
-- 报告详情模态框
+### 改进
+- 终端会话 30 分钟 TTL 自动清理，最大 100 个活跃会话
+- 所有内存管理组件均添加上限和定时清理机制
+- 前端路由切换时自动清理资源，防止 DOM 竞争
+- 批量导入失败时自动清理孤儿数据（servers + group_mapping）
 
-#### API 配置
-- 修复登录 API 路径缺失 `/api` 前缀
-- 模拟模式开关正常保存和读取
+### 文档
+- 新建 `WEB_TERMINAL.md` — Web 终端完整技术文档
+- 新建 `SERVER_MANAGEMENT.md` — 主机管理增强功能文档
+- 新建 `CHANGELOG.md` — 变更日志
+- 新建 `TEST_GUIDE.md` — 功能测试说明
+- 更新 `README.md` — 新增 Web 终端和主机管理功能说明
+- 更新 `docs/README.md` — 新增文档导航条目
+- 更新 `docs/ZABBIX_CONFIG.md` — 修复无效文档引用
+- 更新 `.env.example` — 补充 JWT_SECRET 配置项
+- 删除 `QUICKSTART.md` — 内容已合并到 README
+- 删除 `DEPLOY.md` — 与 `DEPLOYMENT.md` 重复
 
-### UI 优化
-- Logo 标题更新为「多Agent自动化平台」
-- 优化 Markdown 渲染组件样式
-- Agent 测试页面改为分区布局
-- 修复关闭按钮显示问题
+### 代码质量
+- 清理后端 database.ts 中的 5 处 DB_INIT DEBUG 调试日志
+- 清理后端 settingsRoutes.ts 中的 5 处 DEBUG 调试日志
+- 清理前端 Tasks.tsx 中的 10 处 WebSocket 调试日志
+- 清理前端 ChatWidget.tsx 中的 4 处对话调试日志
+- 清理后端 rootCauseAnalysisService.ts 和 reportService.ts 中的调试日志
+- 修复 81 个 ESLint 警告（主要为 `any` 类型和未使用变量）
+- 修复 `Math.random()` 在 `useMemo` 中的不稳定使用
+- 修复 WorkflowEditor 中 useEffect 内 setState 的问题
+- 前后端 TypeScript 编译零错误通过
+- 清理 `.FullName` 垃圾文件和根目录重复的 `wechaterweima.png`
 
-### 技术改进
-- 健康检查使用 curl 替代 wget
-- Dockerfile 安装 curl 用于健康检查
-- 配置国内镜像源加速构建
+### 部署与发布
+- 新增 `QUICK_DEPLOY.md` — 面向国内用户的快速部署指南
+- 新增 `deploy.sh` — Linux 一键部署脚本（自动检查环境、生成配置、拉取镜像、启动服务、健康检查）
+- 推送 Docker 镜像到阿里云杭州镜像仓库
+  - 后端: `registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:backend-v3.0.1`
+  - 前端: `registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:frontend-v3.0.1`
+- 修复 `QUICK_DEPLOY.md` 中 JWT_SECRET 生成逻辑（heredoc 变量展开问题）
+
+### 安全
+- 所有 WebSocket 连接均需 JWT 认证
+- SSH 密码和密钥 AES-256-GCM 加密存储
+- 组件卸载时主动断开 SSH 连接和清理监听器
+- 批量导入自动去重，防止重复添加服务器
+
+---
+
+## [3.0.1] — 2026-05-25
+
+### 版本升级
+- 版本号从 `v1.0.0` 升级至 `v3.0.1`
+- 更新所有 `package.json` 版本号（根目录、frontend、backend）
+- 更新 `SPEC.md` 版本号
+
+## [1.0.0] — 2026-05-18
+
+### 初始发布
+- 多 Agent 协作平台
+- 可视化工作流编排
+- 服务器管理（SSH 命令执行/合规检查）
+- 告警中心（Prometheus/Zabbix/通用）
+- 知识库 + RAG 检索
+- AI Copilot 对话式运维
+- 定时任务
+- 报告系统
+- Docker 一键部署

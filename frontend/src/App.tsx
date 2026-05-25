@@ -23,6 +23,8 @@ import Users from './pages/Users';
 import Settings from './pages/Settings';
 import AlertNoiseManagement from './pages/AlertNoiseManagement';
 import RootCauseAnalysis from './pages/RootCauseAnalysis';
+import TerminalPage from './pages/TerminalPage';
+import BigScreenDashboard from './pages/BigScreenDashboard';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +70,8 @@ function App() {
               <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
               <Route path="alert-noise" element={<ProtectedRoute><AlertNoiseManagement /></ProtectedRoute>} />
               <Route path="root-cause-analysis" element={<ProtectedRoute><RootCauseAnalysis /></ProtectedRoute>} />
+              <Route path="terminal" element={<ProtectedRoute><TerminalPage /></ProtectedRoute>} />
+              <Route path="big-screen" element={<ProtectedRoute><BigScreenDashboard /></ProtectedRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

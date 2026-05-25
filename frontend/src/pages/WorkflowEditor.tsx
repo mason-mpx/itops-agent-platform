@@ -22,8 +22,8 @@ import {
 import '@xyflow/react/dist/style.css';
 import { 
   Save, Trash2, ArrowLeft, Play, Download, Upload, 
-  Copy, Undo, Redo, Settings, CheckCircle, AlertCircle,
-  Plus, Layers
+  Copy, Undo, Redo, Settings, AlertCircle,
+  Layers
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -137,6 +137,7 @@ function WorkflowEditorContent() {
     setHistoryIndex(newHistory.length - 1);
   }, [nodes, edges, history, historyIndex]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (workflow) {
       setName(workflow.name);
@@ -155,11 +156,16 @@ function WorkflowEditorContent() {
   }, [workflow, setNodes, setEdges]);
 
   // Track changes for history
+  const saveHistoryRef = useRef(saveHistory);
+  useEffect(() => {
+    saveHistoryRef.current = saveHistory;
+  }, [saveHistory]);
+
   useEffect(() => {
     if (nodes.length > 0 || edges.length > 0) {
       // Debounce history save
       const timer = setTimeout(() => {
-        saveHistory();
+        saveHistoryRef.current();
       }, 500);
       return () => clearTimeout(timer);
     }
@@ -178,7 +184,6 @@ function WorkflowEditorContent() {
     
     // Check for orphan nodes (except single node)
     if (nodes.length > 1) {
-      const nodeIds = new Set(nodes.map(n => n.id));
       const connectedNodes = new Set<string>();
       edges.forEach(e => {
         connectedNodes.add(e.source);
@@ -376,7 +381,7 @@ function WorkflowEditorContent() {
         } else {
           alert('无效的工作流文件');
         }
-      } catch (err) {
+      } catch {
         alert('导入失败：无效的JSON格式');
       }
     };

@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import db from '../models/database';
-import { randomUUID } from 'crypto';
 export { createAuditLog } from '../services/auditService';
 
 const router = Router();
@@ -19,7 +18,7 @@ router.get('/', (req: Request, res: Response) => {
     } = req.query;
     
     let query = 'SELECT * FROM audit_logs WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (action) {
       query += ' AND action = ?';

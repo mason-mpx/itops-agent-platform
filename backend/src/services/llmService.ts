@@ -1,7 +1,8 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import db from '../models/database';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
+import { getApiKey, getModelId, getApiBase, buildApiEndpoint } from '../utils/apiConfig';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -71,61 +72,6 @@ class CircuitBreaker {
 // 全局熔断器实例
 const circuitBreaker = new CircuitBreaker();
 
-// 辅助函数：获取 API 密钥（优先从数据库读取，无则回退到环境变量）
-function getApiKey(db: any, keyName: string, envName: string): string | undefined {
-  try {
-    const result = db.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
-    if (result && (result as any).value) {
-      const value = (result as any).value;
-      if (value && value !== 'your-doubao-api-key-here' && value !== 'your-openai-api-key-here') {
-        return value;
-      }
-    }
-  } catch (error) {
-    // 忽略错误
-  }
-  const envValue = process.env[envName];
-  if (envValue && envValue !== 'your-doubao-api-key-here' && envValue !== 'your-openai-api-key-here') {
-    return envValue;
-  }
-  return undefined;
-}
-
-// 辅助函数：获取模型 ID（优先从数据库读取，无则回退到环境变量）
-function getModelId(db: any, keyName: string, envName: string, defaultValue: string): string {
-  try {
-    const result = db.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
-    if (result && (result as any).value) {
-      return (result as any).value;
-    }
-  } catch (error) {
-    // 忽略错误
-  }
-  return process.env[envName] || defaultValue;
-}
-
-// 辅助函数：获取 API 基础地址（优先从数据库读取，无则回退到环境变量）
-function getApiBase(db: any, keyName: string, envName: string, defaultValue: string): string {
-  try {
-    const result = db.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
-    if (result && (result as any).value) {
-      return (result as any).value;
-    }
-  } catch (error) {
-    // 忽略错误
-  }
-  return process.env[envName] || defaultValue;
-}
-
-// 辅助函数：构建完整的 API 端点地址，避免路径重复
-function buildApiEndpoint(apiBase: string, endpoint: string): string {
-  // 移除末尾的斜杠
-  const cleanApiBase = apiBase.replace(/\/+$/, '');
-  // 移除开头的斜杠
-  const cleanEndpoint = endpoint.replace(/^\/+/, '');
-  return `${cleanApiBase}/${cleanEndpoint}`;
-}
-
 // 延迟函数
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -173,7 +119,7 @@ function recordAgentExecution(
   status: 'success' | 'failure',
   errorMessage?: string,
   executionTimeMs?: number,
-  metadata?: any
+  metadata?: Record<string, unknown>
 ): void {
   try {
     db.prepare(`
@@ -336,19 +282,21 @@ async function callLLMAPI(
     } else {
       throw new Error('API returned empty choices');
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     circuitBreaker.recordFailure();
     
-    logger.error(`❌ [${agentName}] ${config.providerName} API call failed:`, error.response?.data || error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`❌ [${agentName}] ${config.providerName} API call failed:`, errorMessage);
     
-    if (error.response?.status === 401) {
+    const axiosError = error as { response?: { status?: number; data?: unknown } };
+    if (axiosError.response?.status === 401) {
       throw new Error('Invalid API key - please check your configuration');
-    } else if (error.response?.status === 429) {
+    } else if (axiosError.response?.status === 429) {
       throw new Error('Rate limit exceeded - please try again later');
-    } else if (error.response?.status >= 500) {
+    } else if (axiosError.response?.status && axiosError.response.status >= 500) {
       throw new Error('Server error - please try again later');
     } else {
-      throw new Error(`LLM call failed: ${error.message}`);
+      throw new Error(`LLM call failed: ${errorMessage}`);
     }
   }
 }
@@ -451,7 +399,13 @@ export async function executeAgentWithLLM(
   agentId: string,
   userInput: string
 ): Promise<string> {
-  const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as any;
+  const agent = db.prepare('SELECT id, name, system_prompt, temperature, model FROM agents WHERE id = ?').get(agentId) as {
+    id: string;
+    name: string;
+    system_prompt: string;
+    temperature: number;
+    model: string;
+  } | undefined;
   if (!agent) {
     throw new Error(`Agent not found: ${agentId}`);
   }

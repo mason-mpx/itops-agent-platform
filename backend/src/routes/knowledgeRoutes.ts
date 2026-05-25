@@ -8,7 +8,7 @@ router.get('/', (req: Request, res: Response) => {
   try {
     const { category, search } = req.query;
     let query = 'SELECT * FROM knowledge_base';
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     const conditions = [];
     if (category) {
@@ -26,15 +26,15 @@ router.get('/', (req: Request, res: Response) => {
     
     query += ' ORDER BY usage_count DESC, created_at DESC';
     
-    const knowledge = db.prepare(query).all(...params);
-    knowledge.forEach((k: any) => {
+    const knowledge = db.prepare(query).all(...params) as Array<{ tags?: string; solutions?: string; related_alerts?: string; [key: string]: unknown }>;
+    knowledge.forEach((k) => {
       if (k.tags) k.tags = JSON.parse(k.tags);
       if (k.solutions) k.solutions = JSON.parse(k.solutions);
       if (k.related_alerts) k.related_alerts = JSON.parse(k.related_alerts);
     });
     res.json({ success: true, data: knowledge });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to fetch knowledge' });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -59,7 +59,7 @@ router.post('/', (req: Request, res: Response) => {
     const knowledge = db.prepare('SELECT * FROM knowledge_base WHERE id = ?').get(id);
     res.status(201).json({ success: true, data: knowledge });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to create knowledge entry' });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -85,7 +85,7 @@ router.put('/:id', (req: Request, res: Response) => {
     const knowledge = db.prepare('SELECT * FROM knowledge_base WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: knowledge });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update knowledge entry' });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -94,7 +94,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     db.prepare('DELETE FROM knowledge_base WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Knowledge entry deleted' });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete knowledge entry' });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -109,16 +109,16 @@ router.get('/search', (req: Request, res: Response) => {
       SELECT * FROM knowledge_base 
       WHERE title LIKE ? OR content LIKE ?
       ORDER BY usage_count DESC
-    `).all(`%${q}%`, `%${q}%`);
+    `).all(`%${q}%`, `%${q}%`) as Array<{ tags?: string; solutions?: string; [key: string]: unknown }>;
     
-    knowledge.forEach((k: any) => {
+    knowledge.forEach((k) => {
       if (k.tags) k.tags = JSON.parse(k.tags);
       if (k.solutions) k.solutions = JSON.parse(k.solutions);
     });
     
     res.json({ success: true, data: knowledge });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to search knowledge' });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 

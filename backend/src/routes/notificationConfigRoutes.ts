@@ -6,10 +6,10 @@ const router = Router();
 // 获取通知配置
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const configs = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('notification_%') as any[];
+    const configs = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('notification_%') as Array<{ key: string; value: string }>;
     
-    const config: any = {};
-    configs.forEach((c: any) => {
+    const config: Record<string, unknown> = {};
+    configs.forEach((c) => {
       const key = c.key.replace('notification_', '');
       try {
         config[key] = JSON.parse(c.value);

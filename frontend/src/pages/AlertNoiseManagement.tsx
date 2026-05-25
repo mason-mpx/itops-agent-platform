@@ -25,7 +25,7 @@ interface Stats {
 
 export default function AlertNoiseManagement() {
   const queryClient = useQueryClient();
-  const [selectedFingerprint, setSelectedFingerprint] = useState<string | null>(null);
+  const [selectedFingerprint] = useState<string | null>(null);
   const [showSuppressModal, setShowSuppressModal] = useState(false);
   const [suppressReason, setSuppressReason] = useState('');
   const [suppressDuration, setSuppressDuration] = useState(60);

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import api from '../lib/api';
 
 interface User {
   id: string;
@@ -18,14 +19,10 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // 验证token是否有效
-const verifyToken = async (token: string): Promise<boolean> => {
+const verifyToken = async (_token: string): Promise<boolean> => {
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/auth/me`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-    return response.ok;
+    const response = await api.get('/api/auth/me');
+    return response.status === 200;
   } catch {
     return false;
   }

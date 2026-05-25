@@ -29,7 +29,7 @@
 - 启用HSTS（HTTP Strict Transport Security）
 
 #### 静态加密
-- 确保ENCRYPTION_KEY使用强随机密钥（至少32字符）
+- 数据库加密密钥自动管理（服务器密码和 SSH 密钥使用 AES-256-GCM 加密存储）
 - 定期轮换加密密钥
 - 密钥存储在安全的密钥管理系统（KMS）中，不放在代码或配置文件里
 

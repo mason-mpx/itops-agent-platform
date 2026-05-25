@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../models/database';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 import { env } from '../utils/env';
 import { tokenBlacklist } from '../services/tokenBlacklist';
@@ -21,7 +21,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     // 查询用户
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any;
+    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username) as { id: string; username: string; password: string; role: string; email: string; enabled: number; [key: string]: unknown } | undefined;
 
     if (!user) {
       return res.status(401).json({
@@ -47,7 +47,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     // 生成JWT
-    const token = (jwt.sign as any)(
+    const token = jwt.sign(
       {
         id: user.id,
         username: user.username,
@@ -55,7 +55,7 @@ router.post('/login', async (req: Request, res: Response) => {
         email: user.email
       },
       env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRES_IN }
+      { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
     );
 
     // 更新登录时间
@@ -88,8 +88,8 @@ router.post('/login', async (req: Request, res: Response) => {
         }
       }
     });
-  } catch (error) {
-    console.error('登录失败:', error);
+  } catch {
+    console.error('登录失败');
     res.status(500).json({
       success: false,
       message: '服务器错误'
@@ -98,7 +98,7 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // 获取当前用户信息
-router.get('/me', async (req: Request & { user?: any }, res: Response) => {
+router.get('/me', async (req: Request & { user?: { id: string } }, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -109,9 +109,9 @@ router.get('/me', async (req: Request & { user?: any }, res: Response) => {
     }
 
     const token = authHeader.substring(7);
-    const decoded = (jwt.verify as any)(token, env.JWT_SECRET) as any;
+    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
 
-    const user = db.prepare('SELECT id, username, email, role, enabled, created_at FROM users WHERE id = ?').get(decoded.id) as any;
+    const user = db.prepare('SELECT id, username, email, role, enabled, created_at FROM users WHERE id = ?').get(decoded.id) as { id: string; username: string; email: string; role: string; enabled: number; created_at: string } | undefined;
 
     if (!user) {
       return res.status(401).json({
@@ -124,13 +124,7 @@ router.get('/me', async (req: Request & { user?: any }, res: Response) => {
       success: true,
       data: user
     });
-  } catch (error) {
-    if (error instanceof jwt.TokenExpiredError) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token已过期'
-      });
-    }
+  } catch {
     return res.status(401).json({
       success: false,
       message: '无效的token'
@@ -148,7 +142,7 @@ router.post('/logout', async (req: Request, res: Response) => {
       // 尝试从token中解析用户ID
       let userId: string | undefined;
       try {
-        const decoded = jwt.decode(token) as any;
+        const decoded = jwt.decode(token) as { id?: string } | null;
         if (decoded && decoded.id) {
           userId = decoded.id;
         }
@@ -164,9 +158,7 @@ router.post('/logout', async (req: Request, res: Response) => {
       success: true,
       message: '退出成功'
     });
-  } catch (error) {
-    // 即使出错也返回成功，避免客户端无法处理
-    console.error('Logout error:', error);
+  } catch {
     res.json({
       success: true,
       message: '退出成功'

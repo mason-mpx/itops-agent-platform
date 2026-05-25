@@ -166,6 +166,7 @@ CREATE TABLE alerts (
 - 管理执行上下文
 - 处理条件分支和并行执行
 - 通过WebSocket推送进度
+- 拓扑排序执行，y坐标从上到下、x坐标从左到右
 
 **执行流程**:
 ```
@@ -183,33 +184,39 @@ CREATE TABLE alerts (
 
 ### 2. Agent服务
 
-**文件位置**: `backend/src/services/mockExecutor.ts`, `backend/src/services/llmService.ts`
+**文件位置**: `backend/src/services/agentExecutor.ts`, `backend/src/services/llmService.ts`, `backend/src/services/multiAgentCollaboration.ts`
 
 **主要职责**:
-- 提供预设Agent的实现
-- 调用LLM API进行智能处理
+- 提供9个预设Agent的实现（告警处理、故障诊断、日志分析、系统巡检、变更执行、文档生成、合规检查、服务器命令执行、自动巡检）
+- 支持自定义Agent创建
+- 调用LLM API进行智能处理（支持豆包和OpenAI双API）
 - 管理Agent的系统提示词
 - 处理Agent的输入输出
+- 多Agent协作执行
 
 ### 3. SSH服务
 
-**文件位置**: `backend/src/services/sshService.ts`
+**文件位置**: `backend/src/services/sshService.ts`, `backend/src/services/terminalService.ts`
 
 **主要职责**:
 - 管理SSH连接池
 - 执行远程命令
 - 处理连接认证
 - 管理加密凭证
+- Web SSH终端（基于xterm.js的交互式终端，支持实时双向通信、窗口自适应）
+- 终端会话管理（30分钟TTL自动清理，最大100个活跃会话）
 
 ### 4. 告警处理
 
-**文件位置**: `backend/src/routes/alertRoutes.ts`, `backend/src/routes/webhookRoutes.ts`
+**文件位置**: `backend/src/routes/alertRoutes.ts`, `backend/src/routes/webhookRoutes.ts`, `backend/src/services/alertNoiseReductionService.ts`, `backend/src/services/rootCauseAnalysisService.ts`
 
 **主要职责**:
-- 接收Webhook告警
+- 接收Webhook告警（Prometheus Alertmanager、Zabbix、通用格式）
 - 自动匹配工作流
-- 告警降噪处理
+- 告警降噪处理（自动去重和抑制）
 - 根因分析
+- 告警→工作流自动映射触发
+- 状态管理：new / acknowledged / resolved
 
 ### 5. 通知服务
 
@@ -219,6 +226,36 @@ CREATE TABLE alerts (
 - 多渠道通知（WebSocket、企业微信、钉钉、邮件）
 - 通知配置管理
 - 消息模板渲染
+
+### 6. 知识库与RAG
+
+**文件位置**: `backend/src/services/enhancedRAGService.ts`
+
+**主要职责**:
+- 22条预设知识条目管理
+- 增强RAG检索（关键词匹配+语义相关度评分+使用频率权重+时间衰减）
+- 自动注入LLM对话上下文
+- 批量导入/导出
+
+### 7. AI Copilot
+
+**文件位置**: `backend/src/services/copilotService.ts`
+
+**主要职责**:
+- 自然语言对话式运维助手
+- 自动感知系统告警、服务器、任务状态
+- 基于规则的快速响应 + LLM深度分析
+- 对话历史管理（7天TTL + 1000条上限）
+
+### 8. 定时任务调度
+
+**文件位置**: `backend/src/services/schedulerService.ts`
+
+**主要职责**:
+- 基于node-schedule的Cron定时任务
+- 4个预设定时任务（每日健康检查、每周合规检查、日志定期分析、数据库备份）
+- 自动执行指定工作流
+- 状态管理：启用/禁用、上次/下次运行时间
 
 ## 🔐 安全设计
 

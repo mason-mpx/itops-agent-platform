@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Bot, GitBranch, Play, Bell, TrendingUp, Clock, Server, BookOpen, Zap, Activity, Shield, RefreshCcw } from 'lucide-react';
+import { Bot, GitBranch, Play, Bell, TrendingUp, Clock, Server, BookOpen, Zap, Activity, Shield } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';

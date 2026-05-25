@@ -2,15 +2,16 @@
 import { logger } from '../utils/logger';
 import { executeAgentWithLLM } from './llmService';
 import { executeCommand, runComplianceCheck } from './sshService';
+import { Agent, Server } from '../types';
 
 export async function executeAgentNode(
   agentId: string,
   input: string,
-  context?: any
+  context?: Record<string, unknown>
 ): Promise<string> {
   logger.info(`🔍 executeAgentNode called with agentId: ${agentId} input: ${input?.substring(0, 100)}`);
   
-  const agent = db.prepare('SELECT id, name, system_prompt FROM agents WHERE id = ?').get(agentId) as any;
+  const agent = db.prepare('SELECT id, name, system_prompt FROM agents WHERE id = ?').get(agentId) as Agent | undefined;
   logger.info('🔍 Agent data from DB:', agent);
   
   const agentName = agent?.name || 'Agent';
@@ -33,19 +34,19 @@ export async function executeAgentNode(
 /**
  * 服务器命令执行 Agent：真实执行服务器命令（支持多台服务器）
  */
-async function executeServerCommandAgent(input: string, context?: any): Promise<string> {
+async function executeServerCommandAgent(input: string, context?: Record<string, unknown>): Promise<string> {
   logger.info('💻 executeServerCommandAgent called with:', { input, context });
   
-  let serverIds: string[] | undefined = context?.serverIds;
-  let command: string | undefined = context?.command;
+  let serverIds: string[] | undefined = context?.serverIds as string[] | undefined;
+  let command: string | undefined = context?.command as string | undefined;
   
   if (!serverIds && context?.serverId) {
-    serverIds = [context.serverId];
+    serverIds = [context.serverId as string];
   }
   
   logger.info('💻 Selected server IDs:', serverIds);
   
-  const servers = db.prepare('SELECT id, name, hostname FROM servers WHERE enabled = 1').all() as any[];
+  const servers = db.prepare('SELECT id, name, hostname FROM servers WHERE enabled = 1').all() as Server[];
   if (servers.length === 0) {
     return '## 无法执行操作\n\n**错误**: 没有找到可用的服务器。请先在服务器管理中添加服务器。';
   }
@@ -76,7 +77,7 @@ async function executeServerCommandAgent(input: string, context?: any): Promise<
   let totalFail = 0;
   
   for (const serverId of serverIds) {
-    const server = servers.find((s: any) => s.id === serverId);
+    const server = servers.find((s: Server) => s.id === serverId);
     if (!server) continue;
     
     report += `\n### 🖥️ ${server.name} (${server.hostname})\n\n`;
@@ -98,9 +99,10 @@ async function executeServerCommandAgent(input: string, context?: any): Promise<
         report += `**错误**: \n\`\`\`\n${result.stderr}\n\`\`\`\n`;
       }
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       totalFail++;
-      report += `**错误**: ${error.message}\n\n`;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      report += `**错误**: ${errorMessage}\n\n`;
     }
     
     report += '---\n';
@@ -114,18 +116,18 @@ async function executeServerCommandAgent(input: string, context?: any): Promise<
 /**
  * 自动巡检 Agent：真实执行服务器合规检查（支持多台服务器）
  */
-async function executeAutoInspectionAgent(input: string, context?: any): Promise<string> {
+async function executeAutoInspectionAgent(input: string, context?: Record<string, unknown>): Promise<string> {
   logger.info('🔍 executeAutoInspectionAgent called with:', { input, context });
   
-  let serverIds: string[] | undefined = context?.serverIds;
+  let serverIds: string[] | undefined = context?.serverIds as string[] | undefined;
   
   if (!serverIds && context?.serverId) {
-    serverIds = [context.serverId];
+    serverIds = [context.serverId as string];
   }
   
   logger.info('🔍 Selected server IDs for inspection:', serverIds);
   
-  const servers = db.prepare('SELECT id, name, hostname FROM servers WHERE enabled = 1').all() as any[];
+  const servers = db.prepare('SELECT id, name, hostname FROM servers WHERE enabled = 1').all() as Server[];
   if (servers.length === 0) {
     return '## 无法执行巡检\n\n**错误**: 没有找到可用的服务器。请先在服务器管理中添加服务器。';
   }
@@ -140,7 +142,7 @@ async function executeAutoInspectionAgent(input: string, context?: any): Promise
   let totalFailChecks = 0;
   
   for (const serverId of serverIds) {
-    const server = servers.find((s: any) => s.id === serverId);
+    const server = servers.find((s: Server) => s.id === serverId);
     if (!server) continue;
     
     try {
@@ -168,8 +170,9 @@ async function executeAutoInspectionAgent(input: string, context?: any): Promise
         report += `${result.success ? '✅' : '❌'} **${checkName}**: ${result.success ? '通过' : '失败'}\n`;
       }
       
-    } catch (error: any) {
-      report += `\n### 🖥️ ${server.name} (${server.hostname})\n\n**错误**: ${error.message}\n\n`;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      report += `\n### 🖥️ ${server.name} (${server.hostname})\n\n**错误**: ${errorMessage}\n\n`;
       totalFailChecks += 13;
     }
     

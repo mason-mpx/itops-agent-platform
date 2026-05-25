@@ -1,6 +1,9 @@
 import db from '../models/database';
 import { randomUUID } from 'crypto';
 import { generateCompletion } from './llmService';
+import type { Statement } from 'better-sqlite3';
+
+type StatementNoParams = Statement<[]>;
 
 interface RootCauseAnalysis {
   id: string;
@@ -36,12 +39,12 @@ interface UpdateRCAInput {
 }
 
 class RootCauseAnalysisService {
-  private createRCAs: any;
-  private updateRCAs: any;
-  private getRCAs: any;
-  private getRCAById: any;
-  private getByAlertId: any;
-  private deleteRCA: any;
+  private createRCAs: Statement<[string, string | null, string, string | null, string, string, string, string, string]> | null = null;
+  private updateRCAs: Statement<[string | undefined, string | undefined, string | undefined, string | undefined, string | undefined, string | undefined, string | undefined, string | undefined, string | undefined, string]> | null = null;
+  private getRCAs: StatementNoParams | null = null;
+  private getRCAById: Statement<[string]> | null = null;
+  private getByAlertId: Statement<[string]> | null = null;
+  private deleteRCA: Statement<[string]> | null = null;
 
   constructor() {
     // 延迟初始化，等待数据库准备好
@@ -50,8 +53,8 @@ class RootCauseAnalysisService {
   init() {
     try {
       this.initializeStatements();
-    } catch (e) {
-      console.log("⚠️  RootCauseAnalysisService initialization failed:", (e as Error).message);
+    } catch {
+      console.error("⚠️  RootCauseAnalysisService initialization failed");
     }
   }
 
@@ -86,8 +89,8 @@ class RootCauseAnalysisService {
       this.getByAlertId = db.prepare(`${getRCABase} WHERE alert_id = ?`);
 
       this.deleteRCA = db.prepare('DELETE FROM root_cause_analyses WHERE id = ?');
-    } catch (e) {
-      console.log("⚠️  Could not initialize RootCauseAnalysisService statements:", (e as Error).message);
+    } catch {
+      console.error("⚠️  Could not initialize RootCauseAnalysisService statements");
     }
   }
 
@@ -96,7 +99,7 @@ class RootCauseAnalysisService {
     const status = 'pending' as const;
     
     if (!this.createRCAs) this.initializeStatements();
-    this.createRCAs.run(
+    this.createRCAs!.run(
       id,
       input.alert_id || null,
       input.title,
@@ -109,18 +112,18 @@ class RootCauseAnalysisService {
     );
 
     if (!this.getRCAById) this.initializeStatements();
-    return this.getRCAById.get(id) as RootCauseAnalysis;
+    return this.getRCAById!.get(id) as RootCauseAnalysis;
   }
 
   update(id: string, input: UpdateRCAInput): RootCauseAnalysis | undefined {
     if (!this.getRCAById) this.initializeStatements();
-    const existing = this.getRCAById.get(id);
+    const existing = this.getRCAById!.get(id);
     if (!existing) {
       return undefined;
     }
 
     if (!this.updateRCAs) this.initializeStatements();
-    this.updateRCAs.run(
+    this.updateRCAs!.run(
       input.title,
       input.description,
       input.status,
@@ -133,33 +136,33 @@ class RootCauseAnalysisService {
       id
     );
 
-    return this.getRCAById.get(id) as RootCauseAnalysis;
+    return this.getRCAById!.get(id) as RootCauseAnalysis;
   }
 
   list(): RootCauseAnalysis[] {
     if (!this.getRCAs) this.initializeStatements();
-    return this.getRCAs.all() as RootCauseAnalysis[];
+    return this.getRCAs!.all() as RootCauseAnalysis[];
   }
 
   get(id: string): RootCauseAnalysis | undefined {
     if (!this.getRCAById) this.initializeStatements();
-    return this.getRCAById.get(id) as RootCauseAnalysis | undefined;
+    return this.getRCAById!.get(id) as RootCauseAnalysis | undefined;
   }
 
   getByAlert(alertId: string): RootCauseAnalysis | undefined {
     if (!this.getByAlertId) this.initializeStatements();
-    return this.getByAlertId.get(alertId) as RootCauseAnalysis | undefined;
+    return this.getByAlertId!.get(alertId) as RootCauseAnalysis | undefined;
   }
 
   delete(id: string): boolean {
     if (!this.deleteRCA) this.initializeStatements();
-    const result = this.deleteRCA.run(id);
+    const result = this.deleteRCA!.run(id);
     return result.changes > 0;
   }
 
   async analyze(id: string): Promise<RootCauseAnalysis | undefined> {
     if (!this.getRCAById) this.initializeStatements();
-    const existing = this.getRCAById.get(id) as RootCauseAnalysis;
+    const existing = this.getRCAById!.get(id) as RootCauseAnalysis;
     if (!existing) {
       return undefined;
     }
@@ -173,9 +176,8 @@ class RootCauseAnalysisService {
       try {
         // 优先使用 LLM 进行分析
         analysisResult = await this.performLLMAnalysis(existing);
-      } catch (llmError) {
-        console.log('⚠️ LLM分析失败，使用预设分析结果:', (llmError as Error).message);
-        // LLM 分析失败时，提供一个合理的回退方案
+      } catch {
+        // LLM 分析失败，使用预设分析结果
         analysisResult = this.generateFallbackAnalysis(existing);
       }
 
@@ -225,13 +227,18 @@ class RootCauseAnalysisService {
     // 获取告警信息（如果有关联告警）
     let alertInfo = '';
     if (rca.alert_id) {
-      const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(rca.alert_id);
+      const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(rca.alert_id) as {
+        title: string;
+        content: string;
+        severity: string;
+        source: string;
+      } | undefined;
       if (alert) {
         alertInfo = `
-告警标题: ${(alert as any).title}
-告警内容: ${(alert as any).content}
-告警级别: ${(alert as any).severity}
-告警来源: ${(alert as any).source}
+告警标题: ${alert.title}
+告警内容: ${alert.content}
+告警级别: ${alert.severity}
+告警来源: ${alert.source}
 `;
       }
     }

@@ -22,11 +22,28 @@ ITOps Agent Platform is an enterprise-grade IT operations automation platform wh
 
 ### Backend API Server
 ```bash
+# Latest tag
 docker pull registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-backend-latest
+
+# Versioned tag
+docker pull registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-backend-v3.0.1
 ```
 
 ### Frontend Web UI
 ```bash
+# Latest tag
+docker pull registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-frontend-latest
+
+# Versioned tag
+docker pull registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-frontend-v3.0.1
+```
+
+### Simplified Version (Lightweight)
+```bash
+# Backend simplified version
+docker pull registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:backend-simple-latest
+
+# Frontend (same as standard)
 docker pull registry.cn-hangzhou.aliyuncs.com/huluwa666/tsq-images-hub:itops-frontend-latest
 ```
 
@@ -125,7 +142,9 @@ docker run -d \
 - **Full Documentation:** [GitHub Repository](https://github.com/your-org/ITOpsAgent)
 - **API Reference:** [API Docs](https://github.com/your-org/ITOpsAgent/blob/main/docs/API.md)
 - **Deployment Guide:** [Deployment Guide](https://github.com/your-org/ITOpsAgent/blob/main/DEPLOYMENT.md)
+- **Quick Deployment:** [Quick Deployment](https://github.com/your-org/ITOpsAgent/blob/main/QUICK_DEPLOY.md)
 - **Architecture:** [Architecture Docs](https://github.com/your-org/ITOpsAgent/blob/main/docs/ARCHITECTURE.md)
+- **Development Guide:** [Development Guide](https://github.com/your-org/ITOpsAgent/blob/main/docs/DEVELOPMENT.md)
 
 ## 🔧 Building from Source
 
@@ -134,12 +153,18 @@ docker run -d \
 git clone https://github.com/your-org/ITOpsAgent.git
 cd ITOpsAgent
 
-# Build images
+# Build images (standard version)
 docker build -f docker/Dockerfile.backend -t itops-backend:latest .
 docker build -f docker/Dockerfile.frontend -t itops-frontend:latest .
 
-# Start with docker-compose
+# Build images (simplified backend version)
+docker build -f docker/Dockerfile.backend.simple -t itops-backend-simple:latest .
+
+# Start with docker-compose (standard)
 docker-compose up -d --build
+
+# Start with docker-compose (simplified)
+docker-compose -f docker-compose.simple.yml up -d --build
 ```
 
 ## 🎯 Usage

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
-import { Play, Pause, XCircle, Clock, CheckCircle, XCircle as XIcon, FileText, Activity, List, FileCheck, Plus } from 'lucide-react';
+import { Play, Pause, XCircle, Clock, CheckCircle, XCircle as XIcon, FileText, Activity, List, FileCheck } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import clsx from 'clsx';
 import api from '../lib/api';
@@ -33,14 +33,11 @@ interface Workflow {
 
 export default function Tasks() {
   const { token } = useAuth();
-  const queryClient = useQueryClient();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [executingNodeId, setExecutingNodeId] = useState<string | null>(null);
   const [taskLogs, setTaskLogs] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'logs' | 'nodes' | 'related_reports'>('logs');
   const [showReportDetail, setShowReportDetail] = useState<any>(null);
-  // 用于跟踪上次选中任务的信息，避免不必要的更新
-  const lastSelectedTaskRef = useRef<string | null>(null);
 
   const { data: tasks, refetch: refetchTasks } = useQuery({
     queryKey: ['tasks'],
@@ -49,9 +46,7 @@ export default function Tasks() {
       const taskData = res.data.data as Task[];
       // 解析每个任务的 execution_order、node_results 和 logs 字段
       return taskData.map(task => {
-        let parsedTask = { ...task };
-        
-        // 解析 execution_order
+        const parsedTask = { ...task };
         if (task.execution_order && typeof task.execution_order === 'string') {
           try {
             parsedTask.execution_order = JSON.parse(task.execution_order);
@@ -109,108 +104,119 @@ export default function Tasks() {
       }
     });
 
-    socket.on('connect', () => {
-      console.log('✅ WebSocket connected');
-    });
+    const handleConnect = () => {
+    };
 
-    socket.on('disconnect', () => {
-      console.log('❌ WebSocket disconnected');
-    });
+    const handleDisconnect = () => {
+    };
 
-    socket.on('connect_error', (error) => {
-      console.error('⚠️ WebSocket connection error:', error);
-    });
+    const handleConnectError = (_error: Error) => {
+    };
 
-    socket.on('task:started', (data: any) => {
-      console.log('📋 Task started:', data);
+    const handleTaskStarted = (_data: unknown) => {
       refetchTasks();
-    });
+    };
 
-    socket.on('task:node:started', (data: any) => {
-      console.log('🤖 Node started:', data);
-      setExecutingNodeId(data.nodeId);
-      if (selectedTask?.id === data.taskId) {
-        setTaskLogs((prev) => [
-          ...prev,
-          { type: 'info', content: `开始执行节点: ${data.nodeName}`, timestamp: new Date() },
-        ]);
-      }
-    });
+    const handleNodeStarted = (data: unknown) => {
+      const nodeData = data as { nodeId: string };
+      setExecutingNodeId(nodeData.nodeId);
+    };
 
-    socket.on('task:node:thinking', (data: any) => {
+    const handleNodeThinking = (data: any) => {
       if (selectedTask?.id === data.taskId) {
         setTaskLogs((prev) => [
           ...prev,
           { type: 'thinking', content: data.content, timestamp: new Date() },
         ]);
       }
-    });
+    };
 
-    socket.on('task:node:output', (data: any) => {
+    const handleNodeOutput = (data: any) => {
       if (selectedTask?.id === data.taskId) {
         setTaskLogs((prev) => [
           ...prev,
           { type: 'output', content: data.output, timestamp: new Date() },
         ]);
       }
-    });
+    };
 
-    socket.on('task:node:completed', (data: any) => {
-      console.log('✅ Node completed:', data);
+    const handleNodeCompleted = (data: unknown) => {
       setExecutingNodeId(null);
       refetchTasks();
-      if (selectedTask?.id === data.taskId) {
+      const taskData = data as { taskId: string; status: string };
+      if (selectedTask?.id === taskData.taskId) {
         setTaskLogs((prev) => [
           ...prev,
           {
             type: 'success',
-            content: `节点执行完成: ${data.status}`,
+            content: `节点执行完成: ${taskData.status}`,
             timestamp: new Date(),
           },
         ]);
       }
-    });
+    };
 
-    socket.on('task:completed', (data: any) => {
-      console.log('🎉 Task completed:', data);
+    const handleTaskCompleted = (_data: unknown) => {
       refetchTasks();
-    });
+    };
 
-    socket.on('task:failed', (data: any) => {
-      console.log('❌ Task failed:', data);
+    const handleTaskFailed = (_data: unknown) => {
       refetchTasks();
-    });
+    };
 
-    // 当任务选择变化时，订阅/取消订阅
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleConnectError);
+    socket.on('task:started', handleTaskStarted);
+    socket.on('task:node:started', handleNodeStarted);
+    socket.on('task:node:thinking', handleNodeThinking);
+    socket.on('task:node:output', handleNodeOutput);
+    socket.on('task:node:completed', handleNodeCompleted);
+    socket.on('task:completed', handleTaskCompleted);
+    socket.on('task:failed', handleTaskFailed);
+
     if (selectedTask) {
-      console.log(`📡 Subscribing to task: ${selectedTask.id}`);
       socket.emit('task:subscribe', selectedTask.id);
     }
 
     return () => {
       if (selectedTask) {
-        console.log(`📤 Unsubscribing from task: ${selectedTask.id}`);
         socket.emit('task:unsubscribe', selectedTask.id);
       }
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleConnectError);
+      socket.off('task:started', handleTaskStarted);
+      socket.off('task:node:started', handleNodeStarted);
+      socket.off('task:node:thinking', handleNodeThinking);
+      socket.off('task:node:output', handleNodeOutput);
+      socket.off('task:node:completed', handleNodeCompleted);
+      socket.off('task:completed', handleTaskCompleted);
+      socket.off('task:failed', handleTaskFailed);
       socket.disconnect();
     };
-  }, [selectedTask, refetchTasks]);
+  }, [selectedTask, refetchTasks, token]);
+
+  // 用于同步 selectedTask 到 ref，避免 useEffect 依赖
+  const selectedTaskRef = useRef<Task | null>(selectedTask);
+  useEffect(() => {
+    selectedTaskRef.current = selectedTask;
+  }, [selectedTask]);
 
   // 当任务列表更新时，自动更新当前选中的任务
   useEffect(() => {
-    if (selectedTask && tasks) {
-      const updatedTask = tasks.find(t => t.id === selectedTask.id);
+    const currentSelectedTask = selectedTaskRef.current;
+    if (currentSelectedTask && tasks) {
+      const updatedTask = tasks.find(t => t.id === currentSelectedTask.id);
       if (updatedTask) {
         // 检查是否真的有变化，避免重复更新
         const hasChanged = 
-          updatedTask.status !== selectedTask.status || 
-          JSON.stringify(updatedTask.node_results) !== JSON.stringify(selectedTask.node_results);
+          updatedTask.status !== currentSelectedTask.status || 
+          JSON.stringify(updatedTask.node_results) !== JSON.stringify(currentSelectedTask.node_results);
         
         if (hasChanged) {
           // 直接解析并设置更新后的任务
-          let parsedTask = { ...updatedTask };
-          
-          // 解析 execution_order
+          const parsedTask = { ...updatedTask };
           if (updatedTask.execution_order && typeof updatedTask.execution_order === 'string') {
             try {
               parsedTask.execution_order = JSON.parse(updatedTask.execution_order);
@@ -257,11 +263,11 @@ export default function Tasks() {
         }
       }
     }
-  }, [tasks, selectedTask?.id, selectedTask?.status, selectedTask?.node_results]);
+  }, [tasks]);
   
   const handleSelectTask = (task: Task) => {
     // 解析 execution_order、node_results、logs 字段
-    let parsedTask = { ...task };
+    const parsedTask = { ...task };
     
     // 解析 execution_order
     if (task.execution_order && typeof task.execution_order === 'string') {

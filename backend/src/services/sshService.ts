@@ -1,6 +1,5 @@
-﻿import { Client } from 'ssh2';
+import { Client } from 'ssh2';
 import db from '../models/database';
-import { logger } from '../utils/logger';
 import { randomUUID } from 'crypto';
 import { decrypt } from './encryptionService';
 import { generateCompletion } from './llmService';
@@ -96,14 +95,22 @@ export async function executeCommand(
       throw new Error('Server not found');
     }
 
-    // 解密敏感信息
     const decryptedPassword = server.password ? decrypt(server.password) : undefined;
     const decryptedPrivateKey = server.private_key ? decrypt(server.private_key) : undefined;
 
     return new Promise((resolve) => {
       const conn = new Client();
       let commandTimeout: NodeJS.Timeout | null = null;
+      let isResolved = false;
       
+      const safeResolve = (result: CommandResult) => {
+        if (!isResolved) {
+          isResolved = true;
+          cleanup();
+          handleResult(result);
+        }
+      };
+
       const cleanup = () => {
         if (commandTimeout) {
           clearTimeout(commandTimeout);
@@ -114,12 +121,10 @@ export async function executeCommand(
       const handleResult = (result: CommandResult) => {
         cleanup();
         
-        // 记录历史
         if (logHistory) {
           logCommandHistory(serverId, command, result, options.executedBy || 'system');
         }
         
-        // 更新最后连接时间
         if (result.success) {
           updateLastConnected(serverId);
         }
@@ -131,7 +136,7 @@ export async function executeCommand(
         conn.exec(command, (err, stream) => {
           if (err) {
             conn.end();
-            handleResult({
+            safeResolve({
               success: false,
               stdout: '',
               stderr: err.message,
@@ -144,10 +149,14 @@ export async function executeCommand(
           let stdout = '';
           let stderr = '';
 
-          // 设置命令超时
           commandTimeout = setTimeout(() => {
-            stream.destroy();
-            handleResult({
+            try {
+              stream.destroy();
+            } catch {
+              // stream already destroyed
+            }
+            conn.end();
+            safeResolve({
               success: false,
               stdout: '',
               stderr: 'Command timeout',
@@ -158,7 +167,7 @@ export async function executeCommand(
 
           stream.on('close', (code: number | null) => {
             conn.end();
-            handleResult({
+            safeResolve({
               success: code === 0,
               stdout,
               stderr,
@@ -174,7 +183,12 @@ export async function executeCommand(
           });
         });
       }).on('error', (err) => {
-        handleResult({
+        try {
+          conn.end();
+        } catch {
+          // connection may not be established
+        }
+        safeResolve({
           success: false,
           stdout: '',
           stderr: err.message,
@@ -182,7 +196,12 @@ export async function executeCommand(
           duration: Date.now() - startTime
         });
       }).on('timeout', () => {
-        handleResult({
+        try {
+          conn.end();
+        } catch {
+          // connection may not be established
+        }
+        safeResolve({
           success: false,
           stdout: '',
           stderr: 'Connection timeout',
@@ -191,7 +210,7 @@ export async function executeCommand(
         });
       });
 
-      const connectConfig: any = {
+      const connectConfig: Record<string, unknown> = {
         host: server.hostname,
         port: server.port || 22,
         username: server.username,
@@ -206,7 +225,7 @@ export async function executeCommand(
       } else if (decryptedPassword) {
         connectConfig.password = decryptedPassword;
       } else {
-        handleResult({
+        safeResolve({
           success: false,
           stdout: '',
           stderr: 'No authentication method configured',
@@ -271,7 +290,7 @@ ${result.stderr.substring(0, 1000)}
 
     const analysis = await generateCompletion(prompt, '你是一个专业的服务器运维专家，擅长分析系统状态和提供优化建议。', 0.7);
     return analysis;
-  } catch (error) {
+  } catch {
     return 'AI 分析暂不可用，请查看原始输出。';
   }
 }
@@ -324,21 +343,53 @@ export async function runComplianceCheck(
 }
 
 // 获取合规检查历史
-export function getComplianceHistory(serverId: string, limit: number = 20): any[] {
+export function getComplianceHistory(serverId: string, limit: number = 20): Array<{
+  id: string;
+  server_id: string;
+  check_name: string;
+  check_results: string;
+  status: string;
+  created_at: string;
+}> {
   return db.prepare(`
     SELECT * FROM compliance_checks 
     WHERE server_id = ? 
     ORDER BY created_at DESC 
     LIMIT ?
-  `).all(serverId, limit);
+  `).all(serverId, limit) as Array<{
+    id: string;
+    server_id: string;
+    check_name: string;
+    check_results: string;
+    status: string;
+    created_at: string;
+  }>;
 }
 
 // 获取命令历史
-export function getCommandHistory(serverId: string, limit: number = 50): any[] {
+export function getCommandHistory(serverId: string, limit: number = 50): Array<{
+  id: string;
+  server_id: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+  success: number;
+  execution_time_ms: number;
+  executed_by: string;
+}> {
   return db.prepare(`
     SELECT * FROM server_command_history 
     WHERE server_id = ? 
     ORDER BY executed_at DESC 
     LIMIT ?
-  `).all(serverId, limit);
+  `).all(serverId, limit) as Array<{
+    id: string;
+    server_id: string;
+    command: string;
+    stdout: string;
+    stderr: string;
+    success: number;
+    execution_time_ms: number;
+    executed_by: string;
+  }>;
 }

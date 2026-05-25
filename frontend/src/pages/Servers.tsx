@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Edit, Trash2, Server, Terminal, CheckCircle2,
-  AlertCircle, ShieldCheck, Wifi, History, Clock
+  AlertCircle, ShieldCheck, Wifi, History, Clock, FolderTree,
+  Upload, RefreshCw, ChevronRight, ChevronDown, Cpu,
+  HardDrive, MemoryStick, Monitor, FolderPlus
 } from 'lucide-react';
 import clsx from 'clsx';
 import api from '../lib/api';
@@ -19,6 +21,24 @@ interface Server {
   enabled: number;
   last_connected?: string;
   created_at: string;
+  os?: string;
+  cpu_cores?: number;
+  memory_gb?: number;
+  disk_gb?: number;
+  ip_address?: string;
+  private_ip?: string;
+  groups?: Array<{ id: string; name: string }>;
+}
+
+interface ServerGroup {
+  id: string;
+  name: string;
+  description?: string;
+  parent_id?: string;
+  sort_order: number;
+  server_count?: number;
+  children_count?: number;
+  children?: ServerGroup[];
 }
 
 interface CommandResult {
@@ -75,6 +95,23 @@ export default function Servers() {
   const [isRunningCompliance, setIsRunningCompliance] = useState(false);
   const [activeTab, setActiveTab] = useState<'servers' | 'compliance' | 'command-history' | 'compliance-history'>('servers');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [isCollecting, setIsCollecting] = useState(false);
+  const [groupFormData, setGroupFormData] = useState({ name: '', description: '', parent_id: '' });
+  const [editingGroup, setEditingGroup] = useState<ServerGroup | null>(null);
+  const [importData, setImportData] = useState('');
+  const [importResult, setImportResult] = useState<any>(null);
+  const [showGroups, setShowGroups] = useState(false);
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['server-groups'],
+    queryFn: async () => {
+      const res = await api.get('/api/server-groups/tree');
+      return res.data.data as ServerGroup[];
+    },
+  });
 
   const { data: servers, isLoading } = useQuery({
     queryKey: ['servers'],
@@ -86,13 +123,17 @@ export default function Servers() {
 
   // 获取所有唯一的标签
   const allTags = Array.from(new Set(
-    (servers || []).flatMap((server: Server) => server.tags || [])
+    (Array.isArray(servers) ? servers : [])
+      .flatMap((server: Server) => Array.isArray(server.tags) ? server.tags : [])
   )).sort();
 
-  // 根据选中的标签筛选服务器
-  const filteredServers = selectedTag
-    ? (servers || []).filter((server: Server) => (server.tags || []).includes(selectedTag))
-    : (servers || []);
+  // 根据选中的标签或分组筛选服务器
+  const safeServers = Array.isArray(servers) ? servers : [];
+  const filteredServers = selectedGroupId
+    ? safeServers.filter((server: Server) => (server.groups || []).some((g: any) => g.id === selectedGroupId))
+    : selectedTag
+    ? safeServers.filter((server: Server) => (Array.isArray(server.tags) ? server.tags : []).includes(selectedTag))
+    : safeServers;
 
   const { data: commandHistory, refetch: refetchCommandHistory } = useQuery({
     queryKey: ['commandHistory', selectedServer?.id],
@@ -183,6 +224,60 @@ export default function Servers() {
     },
   });
 
+  const collectInfoMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/api/server-management/${id}/collect-info`);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+  });
+
+  const collectAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/api/server-management/collect-all');
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['servers'] });
+    },
+  });
+
+  const importServersMutation = useMutation({
+    mutationFn: async (data: { servers: any[]; test_connection: boolean }) => {
+      const res = await api.post('/api/server-management/import', data);
+      return res.data;
+    },
+  });
+
+  const createGroupMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await api.post('/api/server-groups', data);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server-groups'] });
+      queryClient.invalidateQueries({ queryKey: ['servers'] });
+      setIsGroupModalOpen(false);
+      setGroupFormData({ name: '', description: '', parent_id: '' });
+      setEditingGroup(null);
+    },
+  });
+
+  const updateGroupMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      const res = await api.put(`/api/server-groups/${id}`, data);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['server-groups'] });
+      setIsGroupModalOpen(false);
+      setGroupFormData({ name: '', description: '', parent_id: '' });
+      setEditingGroup(null);
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       name: '',
@@ -263,164 +358,378 @@ export default function Servers() {
     );
   };
 
+  const handleCollectInfo = async (server: Server) => {
+    setIsCollecting(true);
+    try {
+      await collectInfoMutation.mutateAsync(server.id);
+      alert(`已更新 ${server.name} 的主机信息`);
+    } catch {
+      alert('采集失败');
+    } finally {
+      setIsCollecting(false);
+    }
+  };
+
+  const handleCollectAll = async () => {
+    setIsCollecting(true);
+    try {
+      const result = await collectAllMutation.mutateAsync();
+      alert(`采集完成: ${result.data.success} 成功, ${result.data.failed} 失败`);
+    } catch {
+      alert('批量采集失败');
+    } finally {
+      setIsCollecting(false);
+    }
+  };
+
+  const handleGroupSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingGroup) {
+      updateGroupMutation.mutate({ id: editingGroup.id, data: groupFormData });
+    } else {
+      createGroupMutation.mutate(groupFormData);
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      const servers = importData.split('\n').filter(Boolean).map((line) => {
+        try {
+          const item = JSON.parse(line);
+          return {
+            name: item.name,
+            hostname: item.hostname,
+            port: item.port || 22,
+            username: item.username,
+            password: item.password,
+            private_key: item.private_key,
+            use_ssh_key: item.use_ssh_key || 0,
+            description: item.description || '',
+            tags: item.tags ? item.tags.split(',').map((t: string) => t.trim()) : [],
+            group_id: item.group_id || undefined
+          };
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+
+      if (servers.length === 0) {
+        alert('没有有效的服务器数据，请检查 JSON 格式');
+        return;
+      }
+
+      const result = await importServersMutation.mutateAsync({ servers, test_connection: true });
+      setImportResult(result.data);
+    } catch (err: any) {
+      alert(err.response?.data?.error || '导入失败');
+    }
+  };
+
+  const GroupTree = ({ groups, level = 0 }: { groups: ServerGroup[]; level?: number }) => (
+    <div className={level > 0 ? 'ml-4' : ''}>
+      {groups.map((group) => (
+        <div key={group.id}>
+          <div
+            className={clsx(
+              'flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer transition-colors text-sm',
+              selectedGroupId === group.id
+                ? 'bg-primary/10 text-primary'
+                : 'hover:bg-background text-text-secondary'
+            )}
+            onClick={() => setSelectedGroupId(selectedGroupId === group.id ? null : group.id)}
+          >
+            {group.children && group.children.length > 0 ? (
+              <ChevronDown className="w-3 h-3 flex-shrink-0" />
+            ) : (
+              <ChevronRight className="w-3 h-3 flex-shrink-0" />
+            )}
+            <FolderTree className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="truncate">{group.name}</span>
+            {group.server_count !== undefined && group.server_count > 0 && (
+              <span className="ml-auto text-xs text-text-secondary">({group.server_count})</span>
+            )}
+          </div>
+          {group.children && group.children.length > 0 && (
+            <GroupTree groups={group.children} level={level + 1} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
   const renderTabContent = () => {
     if (activeTab === 'servers') {
       return (
         <>
-          {/* 标签筛选器 */}
-          {allTags.length > 0 && (
-            <div className="mb-4 flex flex-wrap gap-2">
-              <button
-                onClick={() => setSelectedTag(null)}
-                className={clsx(
-                  'px-3 py-1 rounded-full text-sm transition-colors',
-                  !selectedTag
-                    ? 'bg-primary text-white'
-                    : 'bg-background border border-border text-text-secondary hover:bg-surface'
-                )}
-              >
-                全部
-              </button>
-              {allTags.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                  className={clsx(
-                    'px-3 py-1 rounded-full text-sm transition-colors',
-                    selectedTag === tag
-                      ? 'bg-primary text-white'
-                      : 'bg-background border border-border text-text-secondary hover:bg-surface'
-                  )}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* 工具栏 */}
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              onClick={() => setShowGroups(!showGroups)}
+              className={clsx(
+                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors border',
+                showGroups
+                  ? 'bg-primary/10 border-primary/30 text-primary'
+                  : 'border-border bg-surface text-text-secondary hover:text-text-primary'
+              )}
+            >
+              <FolderTree className="w-4 h-4" />
+              分组
+            </button>
+            <button
+              onClick={handleCollectAll}
+              disabled={isCollecting}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={clsx('w-4 h-4', isCollecting && 'animate-spin')} />
+              采集所有主机信息
+            </button>
+            <button
+              onClick={() => { setIsImportModalOpen(true); setImportResult(null); setImportData(''); }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <Upload className="w-4 h-4" />
+              批量导入
+            </button>
+            <button
+              onClick={() => { setEditingGroup(null); setGroupFormData({ name: '', description: '', parent_id: '' }); setIsGroupModalOpen(true); }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-surface border border-border text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <FolderPlus className="w-4 h-4" />
+              新建分组
+            </button>
+          </div>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {isLoading ? (
-              Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="bg-surface border border-border rounded-lg p-4 animate-pulse">
-                  <div className="h-4 bg-border rounded w-1/2 mb-2" />
-                  <div className="h-3 bg-border rounded w-3/4" />
+          <div className="flex gap-4">
+            {/* 分组侧边栏 */}
+            {showGroups && (
+              <div className="w-56 flex-shrink-0 bg-surface border border-border rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-text-primary">服务器分组</h3>
+                  <button
+                    onClick={() => setSelectedGroupId(null)}
+                    className="text-xs text-text-secondary hover:text-text-primary"
+                  >
+                    清除筛选
+                  </button>
                 </div>
-              ))
-            ) : filteredServers.length === 0 ? (
-              <div className="col-span-full flex flex-col items-center justify-center py-12 text-text-secondary">
-                <Server className="w-12 h-12 mb-4 opacity-50" />
-                <p>{selectedTag ? `没有带标签 "${selectedTag}" 的服务器` : '暂无服务器，请添加第一个服务器'}</p>
-              </div>
-            ) : filteredServers.map((server) => (
-              <div key={server.id} className="bg-surface border border-border rounded-lg p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Server className="w-4 h-4 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-text-primary">{server.name}</h3>
-                      <p className="text-xs text-text-secondary">{server.hostname}:{server.port}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleTestConnection(server)}
-                      className="p-1 hover:bg-background rounded transition-colors"
-                      title="测试连接"
-                    >
-                      <Wifi className="w-4 h-4 text-text-secondary" />
-                    </button>
-                    <button
-                      onClick={() => handleEdit(server)}
-                      className="p-1 hover:bg-background rounded transition-colors"
-                      title="编辑"
-                    >
-                      <Edit className="w-4 h-4 text-text-secondary" />
-                    </button>
-                    <button
-                      onClick={() => deleteMutation.mutate(server.id)}
-                      className="p-1 hover:bg-background rounded transition-colors"
-                      title="删除"
-                    >
-                      <Trash2 className="w-4 h-4 text-text-secondary" />
-                    </button>
-                  </div>
-                </div>
-                {server.description && (
-                  <p className="text-xs text-text-secondary mb-3">{server.description}</p>
+                {groupsData && groupsData.length > 0 ? (
+                  <GroupTree groups={groupsData} />
+                ) : (
+                  <p className="text-xs text-text-secondary py-4 text-center">暂无分组</p>
                 )}
-                
-                {/* 标签展示 */}
-                {server.tags && server.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {server.tags.map((tag: string) => (
-                      <span
-                        key={tag}
-                        className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded-full"
+              </div>
+            )}
+
+            {/* 服务器列表 */}
+            <div className="flex-1">
+              {/* 标签筛选器 */}
+              {allTags.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => { setSelectedTag(null); setSelectedGroupId(null); }}
+                    className={clsx(
+                      'px-3 py-1 rounded-full text-sm transition-colors',
+                      !selectedTag && !selectedGroupId
+                        ? 'bg-primary text-white'
+                        : 'bg-background border border-border text-text-secondary hover:bg-surface'
+                    )}
+                  >
+                    全部
+                  </button>
+                  {allTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => { setSelectedTag(selectedTag === tag ? null : tag); setSelectedGroupId(null); }}
+                      className={clsx(
+                        'px-3 py-1 rounded-full text-sm transition-colors',
+                        selectedTag === tag
+                          ? 'bg-primary text-white'
+                          : 'bg-background border border-border text-text-secondary hover:bg-surface'
+                      )}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {isLoading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="bg-surface border border-border rounded-lg p-4 animate-pulse">
+                      <div className="h-4 bg-border rounded w-1/2 mb-2" />
+                      <div className="h-3 bg-border rounded w-3/4" />
+                    </div>
+                  ))
+                ) : filteredServers.length === 0 ? (
+                  <div className="col-span-full flex flex-col items-center justify-center py-12 text-text-secondary">
+                    <Server className="w-12 h-12 mb-4 opacity-50" />
+                    <p>{selectedTag ? `没有带标签 "${selectedTag}" 的服务器` : selectedGroupId ? '该分组下暂无服务器' : '暂无服务器，请添加第一个服务器'}</p>
+                  </div>
+                ) : filteredServers.map((server) => (
+                  <div key={server.id} className="bg-surface border border-border rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Server className="w-4 h-4 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-medium text-text-primary">{server.name}</h3>
+                          <p className="text-xs text-text-secondary">{server.hostname}:{server.port}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleTestConnection(server)}
+                          className="p-1 hover:bg-background rounded transition-colors"
+                          title="测试连接"
+                        >
+                          <Wifi className="w-4 h-4 text-text-secondary" />
+                        </button>
+                        <button
+                          onClick={() => handleCollectInfo(server)}
+                          disabled={isCollecting}
+                          className="p-1 hover:bg-background rounded transition-colors disabled:opacity-50"
+                          title="采集主机信息"
+                        >
+                          <RefreshCw className={clsx('w-4 h-4 text-text-secondary', isCollecting && 'animate-spin')} />
+                        </button>
+                        <button
+                          onClick={() => handleEdit(server)}
+                          className="p-1 hover:bg-background rounded transition-colors"
+                          title="编辑"
+                        >
+                          <Edit className="w-4 h-4 text-text-secondary" />
+                        </button>
+                        <button
+                          onClick={() => deleteMutation.mutate(server.id)}
+                          className="p-1 hover:bg-background rounded transition-colors"
+                          title="删除"
+                        >
+                          <Trash2 className="w-4 h-4 text-text-secondary" />
+                        </button>
+                      </div>
+                    </div>
+                    {server.description && (
+                      <p className="text-xs text-text-secondary mb-3">{server.description}</p>
+                    )}
+                    
+                    {/* 主机扩展信息 */}
+                    {(server.os || server.cpu_cores || server.memory_gb || server.disk_gb) && (
+                      <div className="mb-3 p-2 bg-background rounded-lg">
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {server.os && (
+                            <div className="flex items-center gap-1.5 text-text-secondary">
+                              <Monitor className="w-3 h-3" />
+                              <span className="truncate">{server.os}</span>
+                            </div>
+                          )}
+                          {server.cpu_cores && (
+                            <div className="flex items-center gap-1.5 text-text-secondary">
+                              <Cpu className="w-3 h-3" />
+                              <span>{server.cpu_cores} 核</span>
+                            </div>
+                          )}
+                          {server.memory_gb && (
+                            <div className="flex items-center gap-1.5 text-text-secondary">
+                              <MemoryStick className="w-3 h-3" />
+                              <span>{server.memory_gb} GB</span>
+                            </div>
+                          )}
+                          {server.disk_gb && (
+                            <div className="flex items-center gap-1.5 text-text-secondary">
+                              <HardDrive className="w-3 h-3" />
+                              <span>{server.disk_gb} GB</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* 分组展示 */}
+                    {server.groups && server.groups.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {server.groups.map((g) => (
+                          <span key={g.id} className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs rounded-full flex items-center gap-1">
+                            <FolderTree className="w-2.5 h-2.5" />
+                            {g.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 标签展示 */}
+                    {server.tags && server.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {server.tags.map((tag: string) => (
+                          <span
+                            key={tag}
+                            className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded-full"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center gap-2 mb-3">
+                      {server.last_connected ? (
+                        <span className="flex items-center gap-1 text-xs text-text-secondary">
+                          <CheckCircle2 className="w-3 h-3 text-status-success" />
+                          最后连接: {new Date(server.last_connected).toLocaleDateString()}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-text-secondary">
+                          <AlertCircle className="w-3 h-3 text-status-warning" />
+                          未连接过
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedServer(server);
+                          setCommandResult(null);
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-background rounded-lg text-sm text-text-secondary hover:text-text-primary transition-colors"
                       >
-                        {tag}
-                      </span>
-                    ))}
+                        <Terminal className="w-4 h-4" />
+                        执行命令
+                      </button>
+                      <button
+                        onClick={() => handleRunCompliance(server)}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-primary/10 text-primary rounded-lg text-sm hover:bg-primary/20 transition-colors"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        合规检查
+                      </button>
+                    </div>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => {
+                          setSelectedServer(server);
+                          setActiveTab('command-history');
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-background rounded-lg text-xs text-text-secondary hover:text-text-primary transition-colors"
+                      >
+                        <History className="w-3 h-3" />
+                        命令历史
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedServer(server);
+                          setActiveTab('compliance-history');
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-background rounded-lg text-xs text-text-secondary hover:text-text-primary transition-colors"
+                      >
+                        <Clock className="w-3 h-3" />
+                        检查历史
+                      </button>
+                    </div>
                   </div>
-                )}
-                
-                <div className="flex items-center gap-2 mb-3">
-                  {server.last_connected ? (
-                    <span className="flex items-center gap-1 text-xs text-text-secondary">
-                      <CheckCircle2 className="w-3 h-3 text-status-success" />
-                      最后连接: {new Date(server.last_connected).toLocaleDateString()}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 text-xs text-text-secondary">
-                      <AlertCircle className="w-3 h-3 text-status-warning" />
-                      未连接过
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      setSelectedServer(server);
-                      setCommandResult(null);
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-background rounded-lg text-sm text-text-secondary hover:text-text-primary transition-colors"
-                  >
-                    <Terminal className="w-4 h-4" />
-                    执行命令
-                  </button>
-                  <button
-                    onClick={() => handleRunCompliance(server)}
-                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-primary/10 text-primary rounded-lg text-sm hover:bg-primary/20 transition-colors"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    合规检查
-                  </button>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <button
-                    onClick={() => {
-                      setSelectedServer(server);
-                      setActiveTab('command-history');
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-background rounded-lg text-xs text-text-secondary hover:text-text-primary transition-colors"
-                  >
-                    <History className="w-3 h-3" />
-                    命令历史
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedServer(server);
-                      setActiveTab('compliance-history');
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-background rounded-lg text-xs text-text-secondary hover:text-text-primary transition-colors"
-                  >
-                    <Clock className="w-3 h-3" />
-                    检查历史
-                  </button>
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </>
       );
@@ -496,7 +805,7 @@ export default function Servers() {
           ) : (
             <div className="text-center py-12 text-text-secondary">
               <ShieldCheck className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>点击"合规检查"按钮开始执行检查</p>
+              <p>点击&quot;合规检查&quot;按钮开始执行检查</p>
             </div>
           )}
         </div>
@@ -971,6 +1280,137 @@ export default function Servers() {
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     {selectedServer ? '保存更改' : '添加服务器'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 批量导入模态框 */}
+        {isImportModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-surface rounded-xl p-6 w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-xl font-bold text-text-primary mb-4">批量导入服务器</h3>
+              <p className="text-sm text-text-secondary mb-4">每行一个 JSON 对象，包含以下字段：name, hostname, port, username, password, use_ssh_key(0/1), description, tags(逗号分隔)</p>
+              <div className="mb-4 p-3 bg-background rounded-lg">
+                <p className="text-xs text-text-secondary font-mono mb-2">示例:</p>
+                <pre className="text-xs text-text-secondary font-mono overflow-x-auto">{`{"name":"Web-01","hostname":"192.168.1.10","port":22,"username":"root","password":"xxx","use_ssh_key":0,"description":"生产服务器","tags":"prod,web"}`}</pre>
+              </div>
+              <textarea
+                value={importData}
+                onChange={(e) => setImportData(e.target.value)}
+                placeholder="每行一个 JSON 对象..."
+                rows={8}
+                className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-text-primary font-mono text-sm"
+              />
+              {importResult && (
+                <div className="mt-4 p-4 bg-background rounded-lg">
+                  <h4 className="font-medium text-text-primary mb-2">导入结果</h4>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <span className="text-2xl font-bold text-status-success">{importResult.success}</span>
+                      <p className="text-xs text-text-secondary">成功</p>
+                    </div>
+                    <div>
+                      <span className="text-2xl font-bold text-status-failed">{importResult.failed}</span>
+                      <p className="text-xs text-text-secondary">失败</p>
+                    </div>
+                    <div>
+                      <span className="text-2xl font-bold text-text-secondary">{importResult.skipped}</span>
+                      <p className="text-xs text-text-secondary">跳过(重复)</p>
+                    </div>
+                  </div>
+                  {importResult.details && importResult.details.length > 0 && (
+                    <div className="mt-3 max-h-40 overflow-y-auto">
+                      {importResult.details.map((d: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between py-1 text-xs">
+                          <span>{d.name} ({d.hostname})</span>
+                          <span className={d.status === 'success' ? 'text-status-success' : d.status === 'duplicate' ? 'text-text-secondary' : 'text-status-failed'}>
+                            {d.status === 'success' ? '✓ 成功' : d.status === 'duplicate' ? '跳过' : `✗ ${d.error}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="flex-1 px-4 py-2 bg-surface border border-border text-text-primary rounded-lg hover:bg-background transition-colors"
+                >
+                  关闭
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={!importData}
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <Upload className="w-4 h-4" />
+                  导入
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 分组管理模态框 */}
+        {isGroupModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-surface rounded-xl p-6 w-full max-w-md mx-4">
+              <h3 className="text-xl font-bold text-text-primary mb-6">
+                {editingGroup ? '编辑分组' : '新建分组'}
+              </h3>
+              <form onSubmit={handleGroupSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-2">分组名称 *</label>
+                  <input
+                    type="text"
+                    value={groupFormData.name}
+                    onChange={(e) => setGroupFormData({ ...groupFormData, name: e.target.value })}
+                    placeholder="例如: 生产环境"
+                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-text-primary"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-2">父分组</label>
+                  <select
+                    value={groupFormData.parent_id}
+                    onChange={(e) => setGroupFormData({ ...groupFormData, parent_id: e.target.value })}
+                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-text-primary"
+                  >
+                    <option value="">无 (根分组)</option>
+                    {(groupsData || []).map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-secondary mb-2">描述</label>
+                  <textarea
+                    value={groupFormData.description}
+                    onChange={(e) => setGroupFormData({ ...groupFormData, description: e.target.value })}
+                    placeholder="分组描述..."
+                    rows={3}
+                    className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:border-primary text-text-primary"
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => { setIsGroupModalOpen(false); setEditingGroup(null); }}
+                    className="flex-1 px-4 py-2 bg-surface border border-border text-text-primary rounded-lg hover:bg-background transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    {editingGroup ? '保存更改' : '创建分组'}
                   </button>
                 </div>
               </form>

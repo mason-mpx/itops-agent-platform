@@ -1,32 +1,16 @@
 #!/bin/bash
 # ============================================================
-# ITOps Agent Platform - Quick Deploy Script
+# ITOps Agent Platform - 一键部署脚本
 # ============================================================
-# Usage:
-#   ./deploy.sh [OPTIONS]
-#
-# Examples:
-#   # Deploy with default settings
-#   ./deploy.sh
-#
-#   # Deploy with custom image registry
-#   ./deploy.sh --username your-username
-#
-#   # Deploy specific version on custom ports
-#   ./deploy.sh --username your-username --version v1.0.0 --backend-port 8000 --frontend-port 9000
+# 用法:
+#   curl -fsSL https://your-repo/deploy.sh | bash
+#   或
+#   wget -O deploy.sh https://your-repo/deploy.sh && bash deploy.sh
 # ============================================================
 
-set -euo pipefail
+set -e
 
-# Default values
-REGISTRY="docker.io"
-USERNAME=""
-VERSION="latest"
-BACKEND_PORT="3001"
-FRONTEND_PORT="8080"
-JWT_SECRET=""
-
-# Colors
+# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -34,178 +18,123 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+# 镜像配置
+REGISTRY="registry.cn-hangzhou.aliyuncs.com"
+NAMESPACE="huluwa666"
+REPO="tsq-images-hub"
+BACKEND_TAG="backend-v3.0.1"
+FRONTEND_TAG="frontend-v3.0.1"
 
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --registry)
-            REGISTRY="$2"
-            shift 2
-            ;;
-        --username)
-            USERNAME="$2"
-            shift 2
-            ;;
-        --version)
-            VERSION="$2"
-            shift 2
-            ;;
-        --backend-port)
-            BACKEND_PORT="$2"
-            shift 2
-            ;;
-        --frontend-port)
-            FRONTEND_PORT="$2"
-            shift 2
-            ;;
-        --jwt-secret)
-            JWT_SECRET="$2"
-            shift 2
-            ;;
-        --help)
-            echo "==========================================="
-            echo " ITOps Agent Platform - Deploy Script"
-            echo "==========================================="
-            echo ""
-            echo "Usage:"
-            echo "  ./deploy.sh [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --registry       Container registry (default: docker.io)"
-            echo "  --username       Registry username (required if not using default images)"
-            echo "  --version        Image version tag (default: latest)"
-            echo "  --backend-port   Backend API port (default: 3001)"
-            echo "  --frontend-port  Frontend web port (default: 8080)"
-            echo "  --jwt-secret     JWT secret key (auto-generated if not provided)"
-            echo "  --help           Show this help message"
-            echo ""
-            echo "Examples:"
-            echo "  # Deploy with default settings"
-            echo "  ./deploy.sh"
-            echo ""
-            echo "  # Deploy with custom images"
-            echo "  ./deploy.sh --username your-dockerhub-username"
-            echo ""
-            echo "  # Deploy specific version on custom ports"
-            echo "  ./deploy.sh --username your-username --version v1.0.0 --backend-port 8000 --frontend-port 9000"
-            echo "==========================================="
+BACKEND_IMAGE="${REGISTRY}/${NAMESPACE}/${REPO}:${BACKEND_TAG}"
+FRONTEND_IMAGE="${REGISTRY}/${NAMESPACE}/${REPO}:${FRONTEND_TAG}"
+
+# 打印标题
+print_header() {
+    echo -e "${CYAN}==========================================${NC}"
+    echo -e "${CYAN} ITOps Agent Platform - 一键部署${NC}"
+    echo -e "${CYAN}==========================================${NC}"
+    echo ""
+}
+
+# 打印信息
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 检查依赖
+check_dependencies() {
+    print_info "检查系统依赖..."
+    
+    # 检查 Docker
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker 未安装，请先安装 Docker"
+        print_info "安装指南: https://docs.docker.com/engine/install/"
+        exit 1
+    fi
+    
+    # 检查 Docker Compose
+    if docker compose version &> /dev/null; then
+        COMPOSE_CMD="docker compose"
+        print_success "检测到 docker compose (v2)"
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+        print_success "检测到 docker-compose (v1)"
+    else
+        print_error "Docker Compose 未安装"
+        print_info "安装指南: https://docs.docker.com/compose/install/"
+        exit 1
+    fi
+    
+    # 检查 Docker 是否运行
+    if ! docker info &> /dev/null; then
+        print_error "Docker 服务未运行"
+        exit 1
+    fi
+    
+    print_success "系统依赖检查通过"
+    echo ""
+}
+
+# 创建目录
+setup_directory() {
+    DEPLOY_DIR="${1:-/opt/itops}"
+    
+    if [ -d "$DEPLOY_DIR" ]; then
+        print_warn "目录 $DEPLOY_DIR 已存在"
+        read -p "是否继续使用? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             exit 0
-            ;;
-        *)
-            error "Unknown argument: $1"
-            ;;
-    esac
-done
-
-# Check prerequisites
-info "Checking prerequisites..."
-
-# Check Docker
-if ! command -v docker &> /dev/null; then
-    error "Docker is not installed. Please install Docker first: https://docs.docker.com/get-docker/"
-fi
-success "Docker is installed"
-
-# Check Docker Compose
-if ! docker compose version &> /dev/null; then
-    error "Docker Compose is not available. Please install Docker Desktop or docker-compose-plugin."
-fi
-success "Docker Compose is available"
-
-# Check if ports are available
-info "Checking port availability..."
-
-if command -v lsof &> /dev/null; then
-    if lsof -Pi :$BACKEND_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
-        error "Port $BACKEND_PORT is already in use. Please choose a different port with --backend-port"
+        fi
+    else
+        print_info "创建部署目录: $DEPLOY_DIR"
+        mkdir -p "$DEPLOY_DIR"
     fi
-    if lsof -Pi :$FRONTEND_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
-        error "Port $FRONTEND_PORT is already in use. Please choose a different port with --frontend-port"
+    
+    cd "$DEPLOY_DIR"
+    print_success "当前工作目录: $(pwd)"
+    echo ""
+}
+
+# 生成 docker-compose.yml
+generate_compose_file() {
+    if [ -f "docker-compose.yml" ]; then
+        print_warn "docker-compose.yml 已存在"
+        read -p "是否覆盖? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "跳过生成 compose 文件"
+            return
+        fi
     fi
-elif command -v ss &> /dev/null; then
-    if ss -tlnp | grep -q ":$BACKEND_PORT "; then
-        error "Port $BACKEND_PORT is already in use. Please choose a different port with --backend-port"
-    fi
-    if ss -tlnp | grep -q ":$FRONTEND_PORT "; then
-        error "Port $FRONTEND_PORT is already in use. Please choose a different port with --frontend-port"
-    fi
-fi
-
-success "Ports are available"
-
-# Generate JWT secret if not provided
-if [ -z "$JWT_SECRET" ]; then
-    JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
-    info "Generated JWT secret (will be saved to .env)"
-fi
-
-# Create .env file
-info "Creating .env file..."
-cat > .env << EOF
-# ITOps Agent Platform - Environment Configuration
-# Generated on $(date '+%Y-%m-%d %H:%M:%S')
-
-# JWT Configuration
-JWT_SECRET=$JWT_SECRET
-
-# LLM API Configuration (configure at least one)
-# Doubao (豆包)
-DOUBAO_API_KEY=
-DOUBAO_API_BASE=https://ark.cn-beijing.volces.com/api/v3
-DOUBAO_MODEL=doubao-4o
-
-# OpenAI
-OPENAI_API_KEY=
-OPENAI_API_BASE=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
-
-# Server Configuration
-ALLOWED_ORIGINS=http://localhost:$FRONTEND_PORT
-EOF
-
-success ".env file created"
-
-# Determine image names
-if [ -z "$USERNAME" ]; then
-    BACKEND_IMAGE="itops-backend:$VERSION"
-    FRONTEND_IMAGE="itops-frontend:$VERSION"
-    warn "Using local images. If you want to pull from registry, specify --username"
-else
-    BACKEND_IMAGE="$REGISTRY/$USERNAME/itops-backend:$VERSION"
-    FRONTEND_IMAGE="$REGISTRY/$USERNAME/itops-frontend:$VERSION"
-fi
-
-# Create docker-compose.deploy.yml
-info "Creating deployment configuration..."
-cat > docker-compose.deploy.yml << EOF
-version: '3.8'
-
+    
+    print_info "生成 docker-compose.yml..."
+    
+    cat > docker-compose.yml << 'COMPOSE_EOF'
 services:
   backend:
-    image: $BACKEND_IMAGE
+    image: ${BACKEND_IMAGE}
     container_name: itops-backend
-    ports:
-      - "$BACKEND_PORT:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-      - HOST=0.0.0.0
-      - DATABASE_PATH=/app/data/app.db
-      - JWT_SECRET=\${JWT_SECRET}
-      - DOUBAO_API_KEY=\${DOUBAO_API_KEY:-}
-      - DOUBAO_API_BASE=\${DOUBAO_API_BASE:-https://ark.cn-beijing.volces.com/api/v3}
-      - DOUBAO_MODEL=\${DOUBAO_MODEL:-doubao-4o}
-      - OPENAI_API_KEY=\${OPENAI_API_KEY:-}
-      - OPENAI_API_BASE=\${OPENAI_API_BASE:-https://api.openai.com/v1}
-      - OPENAI_MODEL=\${OPENAI_MODEL:-gpt-4o}
-      - ALLOWED_ORIGINS=\${ALLOWED_ORIGINS:-http://localhost:$FRONTEND_PORT}
-    volumes:
-      - itops-data:/app/data
     restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file: .env
+    volumes:
+      - app-data:/app/data
+    networks:
+      - itops-network
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""]
       interval: 30s
@@ -214,91 +143,214 @@ services:
       start_period: 30s
 
   frontend:
-    image: $FRONTEND_IMAGE
+    image: ${FRONTEND_IMAGE}
     container_name: itops-frontend
+    restart: unless-stopped
     ports:
-      - "$FRONTEND_PORT:80"
+      - "80:80"
     depends_on:
       backend:
         condition: service_healthy
-    restart: unless-stopped
-
-volumes:
-  itops-data:
-    driver: local
+    networks:
+      - itops-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
-  default:
+  itops-network:
     driver: bridge
-EOF
 
-success "Deployment configuration created"
+volumes:
+  app-data:
+    driver: local
+COMPOSE_EOF
+    
+    # 替换镜像变量
+    sed -i "s|\${BACKEND_IMAGE}|${BACKEND_IMAGE}|g" docker-compose.yml
+    sed -i "s|\${FRONTEND_IMAGE}|${FRONTEND_IMAGE}|g" docker-compose.yml
+    
+    print_success "docker-compose.yml 已生成"
+    echo ""
+}
 
-# Pull images if username specified
-if [ -n "$USERNAME" ]; then
-    info "Pulling images from $REGISTRY..."
-    docker pull $BACKEND_IMAGE || error "Failed to pull backend image"
-    success "Backend image pulled"
-
-    docker pull $FRONTEND_IMAGE || error "Failed to pull frontend image"
-    success "Frontend image pulled"
-fi
-
-# Start services
-info "Starting ITOps Agent Platform..."
-docker compose -f docker-compose.deploy.yml up -d || error "Failed to start services"
-
-# Wait for services to be ready
-info "Waiting for services to start..."
-sleep 10
-
-# Check health
-max_retries=30
-retry_count=0
-backend_ready=false
-
-while [ $retry_count -lt $max_retries ]; do
-    if curl -sf http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
-        backend_ready=true
-        break
+# 生成 .env 文件
+generate_env_file() {
+    if [ -f ".env" ]; then
+        print_warn ".env 文件已存在"
+        read -p "是否覆盖? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "跳过生成 .env 文件"
+            return
+        fi
     fi
-    sleep 2
-    retry_count=$((retry_count + 1))
-    echo -n "."
-done
+    
+    print_info "生成 .env 配置文件..."
+    
+    # 生成随机 JWT_SECRET
+    JWT_SECRET=$(openssl rand -base64 32 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+    
+    cat > .env << EOF
+# ITOps Agent Platform 配置文件
+# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
 
-echo ""
+# JWT 签名密钥（生产环境必须修改）
+JWT_SECRET=${JWT_SECRET}
 
-if [ "$backend_ready" = true ]; then
-    success "ITOps Agent Platform is ready!"
-else
-    warn "Backend service might still be starting. Check with: docker compose -f docker-compose.deploy.yml ps"
-fi
+# 后端端口
+PORT=3001
 
-# Show access information
-echo ""
-echo -e "${CYAN}===========================================${NC}"
-echo -e "${GREEN} ITOps Agent Platform Deployed Successfully!${NC}"
-echo -e "${CYAN}===========================================${NC}"
-echo ""
-echo -e "${YELLOW}Access URLs:${NC}"
-echo "  Frontend: http://localhost:$FRONTEND_PORT"
-echo "  Backend:  http://localhost:$BACKEND_PORT"
-echo "  Health:   http://localhost:$BACKEND_PORT/health"
-echo ""
-echo -e "${YELLOW}Default Credentials:${NC}"
-echo "  Username: admin"
-echo "  Password: admin123"
-echo ""
-echo -e "${YELLOW}Quick Commands:${NC}"
-echo "  View logs:        docker compose -f docker-compose.deploy.yml logs -f"
-echo "  Stop services:    docker compose -f docker-compose.deploy.yml down"
-echo "  Restart services: docker compose -f docker-compose.deploy.yml restart"
-echo ""
-echo -e "${YELLOW}Next Steps:${NC}"
-echo "  1. Visit http://localhost:$FRONTEND_PORT in your browser"
-echo "  2. Login with admin/admin123"
-echo "  3. Configure your LLM API keys in Settings"
-echo "  4. Start creating agents and workflows!"
-echo ""
-echo -e "${CYAN}===========================================${NC}"
+# 运行环境
+NODE_ENV=production
+
+# 允许的来源（逗号分隔）
+ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://localhost:8080
+
+# 豆包 API 配置（可选）
+# DOUBAO_API_KEY=
+# DOUBAO_API_BASE=https://ark.cn-beijing.volces.com/api/v3
+# DOUBAO_MODEL=doubao-4o
+
+# OpenAI API 配置（可选）
+# OPENAI_API_KEY=
+# OPENAI_API_BASE=https://api.openai.com/v1
+# OPENAI_MODEL=gpt-4o
+EOF
+    
+    print_success ".env 文件已生成"
+    print_warn "请妥善保管 JWT_SECRET，不要泄露"
+    echo ""
+}
+
+# 拉取镜像
+pull_images() {
+    print_info "开始拉取 Docker 镜像..."
+    echo ""
+    
+    print_info "拉取后端镜像: ${BACKEND_IMAGE}"
+    docker pull "$BACKEND_IMAGE"
+    print_success "后端镜像拉取成功"
+    echo ""
+    
+    print_info "拉取前端镜像: ${FRONTEND_IMAGE}"
+    docker pull "$FRONTEND_IMAGE"
+    print_success "前端镜像拉取成功"
+    echo ""
+}
+
+# 启动服务
+start_services() {
+    print_info "启动服务..."
+    echo ""
+    
+    $COMPOSE_CMD up -d
+    
+    echo ""
+    print_info "等待服务启动..."
+    sleep 5
+}
+
+# 验证服务
+verify_services() {
+    print_info "验证服务状态..."
+    echo ""
+    
+    # 检查容器状态
+    $COMPOSE_CMD ps
+    echo ""
+    
+    # 等待后端健康检查
+    print_info "等待后端服务就绪..."
+    MAX_WAIT=60
+    WAIT_COUNT=0
+    
+    while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+        if curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/health | grep -q "200"; then
+            print_success "后端服务已就绪"
+            break
+        fi
+        sleep 2
+        WAIT_COUNT=$((WAIT_COUNT + 2))
+    done
+    
+    if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+        print_warn "后端服务启动超时，请检查日志: docker logs itops-backend"
+    fi
+    
+    # 检查前端
+    sleep 3
+    if curl -s -o /dev/null -w "%{http_code}" http://localhost:80 | grep -q "200"; then
+        print_success "前端服务已就绪"
+    else
+        print_warn "前端服务可能未就绪，请检查日志: docker logs itops-frontend"
+    fi
+    
+    echo ""
+}
+
+# 打印部署信息
+print_deploy_info() {
+    SERVER_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "服务器IP")
+    
+    echo -e "${CYAN}==========================================${NC}"
+    echo -e "${GREEN} 部署成功!${NC}"
+    echo -e "${CYAN}==========================================${NC}"
+    echo ""
+    echo -e "前端地址:  ${GREEN}http://${SERVER_IP}${NC}"
+    echo -e "后端 API:  ${GREEN}http://${SERVER_IP}:3001/api/health${NC}"
+    echo ""
+    echo -e "默认账号:  ${YELLOW}admin${NC}"
+    echo -e "默认密码:  ${YELLOW}admin123${NC}"
+    echo ""
+    echo -e "${CYAN}常用命令:${NC}"
+    echo -e "  查看状态:  ${BLUE}$COMPOSE_CMD ps${NC}"
+    echo -e "  查看日志:  ${BLUE}$COMPOSE_CMD logs -f${NC}"
+    echo -e "  停止服务:  ${BLUE}$COMPOSE_CMD down${NC}"
+    echo -e "  重启服务:  ${BLUE}$COMPOSE_CMD restart${NC}"
+    echo ""
+    echo -e "${CYAN}==========================================${NC}"
+}
+
+# 主流程
+main() {
+    print_header
+    
+    # 解析参数
+    DEPLOY_DIR="/opt/itops"
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -d|--dir)
+                DEPLOY_DIR="$2"
+                shift 2
+                ;;
+            -h|--help)
+                echo "用法: $0 [-d 部署目录] [-h 帮助]"
+                echo ""
+                echo "选项:"
+                echo "  -d, --dir    部署目录 (默认: /opt/itops)"
+                echo "  -h, --help   显示帮助"
+                exit 0
+                ;;
+            *)
+                print_error "未知参数: $1"
+                exit 1
+                ;;
+        esac
+    done
+    
+    check_dependencies
+    setup_directory "$DEPLOY_DIR"
+    generate_compose_file
+    generate_env_file
+    pull_images
+    start_services
+    verify_services
+    print_deploy_info
+}
+
+main "$@"

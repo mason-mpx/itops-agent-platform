@@ -7,8 +7,8 @@ router.get('/stats', (_req: Request, res: Response) => {
   try {
     const stats = alertNoiseReductionService.getNoiseReductionStats();
     res.json({ success: true, data: stats });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to get noise reduction stats' });
   }
 });
 
@@ -16,8 +16,8 @@ router.get('/suppressed', (_req: Request, res: Response) => {
   try {
     const alerts = alertNoiseReductionService.getSuppressedAlerts();
     res.json({ success: true, data: alerts });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to get suppressed alerts' });
   }
 });
 
@@ -34,8 +34,8 @@ router.post('/unsuppress', (req: Request, res: Response) => {
     }
 
     res.json({ success: true, message: '告警已恢复' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to unsuppress alert' });
   }
 });
 
@@ -57,8 +57,8 @@ router.post('/suppress', (req: Request, res: Response) => {
     }
 
     res.json({ success: true, message: '告警已抑制' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to suppress alert' });
   }
 });
 
@@ -67,8 +67,8 @@ router.post('/cleanup', (req: Request, res: Response) => {
     const { daysToKeep = 30 } = req.body;
     const deletedCount = alertNoiseReductionService.cleanupOldRecords(daysToKeep);
     res.json({ success: true, data: { deletedCount } });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to cleanup old records' });
   }
 });
 

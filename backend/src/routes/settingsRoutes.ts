@@ -1,18 +1,19 @@
 import { Router, Request, Response } from 'express';
 import db from '../models/database';
 import { safeLog, safeError, maskApiKey } from '../utils/sensitiveMask';
+import { getApiKey, getModelId, getApiBase } from '../utils/apiConfig';
 
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
   try {
-    const settings = db.prepare('SELECT * FROM settings').all();
+    const settings = db.prepare('SELECT * FROM settings').all() as Array<{ key: string; value: string }>;
     const settingsObj: Record<string, string> = {};
-    settings.forEach((s: any) => {
+    settings.forEach((s) => {
       settingsObj[s.key] = s.value;
     });
     res.json({ success: true, data: settingsObj });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch settings' });
   }
 });
@@ -44,57 +45,10 @@ router.put('/', (req: Request, res: Response) => {
     }
     
     res.json({ success: true, message: 'Settings updated' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to update settings' });
   }
 });
-
-// 辅助函数：获取API 密钥（优先从数据库读取，无则回退到环境变量）
-function getApiKey(db: any, keyName: string, envName: string): string | undefined {
-  try {
-    const result = db.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
-    if (result && (result as any).value) {
-      const value = (result as any).value;
-      // 忽略占位符密钥
-      if (value && value !== 'your-doubao-api-key-here' && value !== 'your-openai-api-key-here') {
-        return value;
-      }
-    }
-  } catch (error) {
-    // 忽略数据库错误，回退到环境变量
-  }
-  const envValue = process.env[envName];
-  if (envValue && envValue !== 'your-doubao-api-key-here' && envValue !== 'your-openai-api-key-here') {
-    return envValue;
-  }
-  return undefined;
-}
-
-// 辅助函数：获取模型ID（优先从数据库读取，无则回退到环境变量）
-function getModelId(db: any, keyName: string, envName: string, defaultValue: string): string {
-  try {
-    const result = db.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
-    if (result && (result as any).value) {
-      return (result as any).value;
-    }
-  } catch (error) {
-    // 忽略数据库错误，回退到环境变量
-  }
-  return process.env[envName] || defaultValue;
-}
-
-// 辅助函数：获取API 基础地址（优先从数据库读取，无则回退到环境变量）
-function getApiBase(db: any, keyName: string, envName: string, defaultValue: string): string {
-  try {
-    const result = db.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
-    if (result && (result as any).value) {
-      return (result as any).value;
-    }
-  } catch (error) {
-    // 忽略数据库错误，回退到环境变量
-  }
-  return process.env[envName] || defaultValue;
-}
 
 router.get('/api-keys', (_req: Request, res: Response) => {
   try {
@@ -122,7 +76,7 @@ router.get('/api-keys', (_req: Request, res: Response) => {
         }
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch API key status' });
   }
 });
@@ -195,7 +149,7 @@ router.get('/models', (_req: Request, res: Response) => {
       success: true,
       data: models
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch models' });
   }
 });
@@ -279,25 +233,17 @@ router.put('/api-keys', (req: Request, res: Response) => {
     const doubaoKeyResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('DOUBAO_API_KEY');
     const doubaoModelResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('DOUBAO_MODEL');
     
-    safeLog('🔍 DEBUG - doubaoApiKey:', doubaoKeyResult ? maskApiKey((doubaoKeyResult as any).value) : 'null');
-    safeLog('🔍 DEBUG - doubaoModel from DB:', doubaoModelResult ? (doubaoModelResult as any).value : 'null');
-    
-    if (doubaoKeyResult && (doubaoKeyResult as any).value && (doubaoKeyResult as any).value !== 'your-doubao-api-key-here') {
-      configuredModel = (doubaoModelResult && (doubaoModelResult as any).value) ? (doubaoModelResult as any).value : 'doubao-4o';
+    if (doubaoKeyResult && (doubaoKeyResult as { value: string }).value && (doubaoKeyResult as { value: string }).value !== 'your-doubao-api-key-here') {
+      configuredModel = (doubaoModelResult && (doubaoModelResult as { value: string }).value) ? (doubaoModelResult as { value: string }).value : 'doubao-4o';
     } else {
       // 如果豆包没有配置，检查OpenAI
       const openaiKeyResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('OPENAI_API_KEY');
       const openaiModelResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('OPENAI_MODEL');
       
-      safeLog('🔍 DEBUG - openaiApiKey:', openaiKeyResult ? maskApiKey((openaiKeyResult as any).value) : 'null');
-      safeLog('🔍 DEBUG - openaiModel from DB:', openaiModelResult ? (openaiModelResult as any).value : 'null');
-      
-      if (openaiKeyResult && (openaiKeyResult as any).value && (openaiKeyResult as any).value !== 'your-openai-api-key-here') {
-        configuredModel = (openaiModelResult && (openaiModelResult as any).value) ? (openaiModelResult as any).value : 'gpt-4o';
+      if (openaiKeyResult && (openaiKeyResult as { value: string }).value && (openaiKeyResult as { value: string }).value !== 'your-openai-api-key-here') {
+        configuredModel = (openaiModelResult && (openaiModelResult as { value: string }).value) ? (openaiModelResult as { value: string }).value : 'gpt-4o';
       }
     }
-    
-    safeLog('🔍 DEBUG - Final configuredModel to use for presets:', configuredModel);
     
     // 如果有配置的模型，更新所有预设Agent
     if (configuredModel) {
@@ -307,7 +253,7 @@ router.put('/api-keys', (req: Request, res: Response) => {
         WHERE is_preset = 1
       `);
       const result = updateStmt.run(configuredModel);
-      safeLog(`✅ Updated ${(result as any).changes} preset agents with model: ${configuredModel}`);
+      safeLog(`✅ Updated ${(result as { changes: number }).changes} preset agents with model: ${configuredModel}`);
     } else {
       // 如果没有配置模型，清空所有预设Agent的model字段
       const updateStmt = db.prepare(`
@@ -316,12 +262,12 @@ router.put('/api-keys', (req: Request, res: Response) => {
         WHERE is_preset = 1
       `);
       const result = updateStmt.run();
-      safeLog(`✅ Cleared model from ${(result as any).changes} preset agents`);
+      safeLog(`✅ Cleared model from ${(result as { changes: number }).changes} preset agents`);
     }
     
     safeLog('✅ API key settings saved successfully');
     res.json({ success: true, message: 'Settings saved' });
-  } catch (error) {
+  } catch (error: unknown) {
     safeError('❌ Failed to save settings:', error);
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to save settings' });
   }
@@ -350,12 +296,12 @@ router.delete('/api-keys/:provider', (req: Request, res: Response) => {
     
     // 检查豆包是否还有配置
     const doubaoKey = db.prepare('SELECT value FROM settings WHERE key = ?').get('DOUBAO_API_KEY');
-    if (doubaoKey && (doubaoKey as any).value && (doubaoKey as any).value !== 'your-doubao-api-key-here') {
+    if (doubaoKey && (doubaoKey as { value: string }).value && (doubaoKey as { value: string }).value !== 'your-doubao-api-key-here') {
       hasRemainingConfig = true;
     } else {
       // 检查OpenAI是否还有配置
       const openaiKey = db.prepare('SELECT value FROM settings WHERE key = ?').get('OPENAI_API_KEY');
-      if (openaiKey && (openaiKey as any).value && (openaiKey as any).value !== 'your-openai-api-key-here') {
+      if (openaiKey && (openaiKey as { value: string }).value && (openaiKey as { value: string }).value !== 'your-openai-api-key-here') {
         hasRemainingConfig = true;
       }
     }
@@ -368,21 +314,21 @@ router.delete('/api-keys/:provider', (req: Request, res: Response) => {
         WHERE is_preset = 1
       `);
       const result = updateStmt.run();
-      safeLog(`✅ Cleared model from ${(result as any).changes} preset agents (no API keys configured)`);
+      safeLog(`✅ Cleared model from ${(result as { changes: number }).changes} preset agents (no API keys configured)`);
     } else {
       // 还有其他配置，重新确定应该用哪个模型
       let configuredModel = null;
       
       // 优先检查豆包模型
-      if (doubaoKey && (doubaoKey as any).value && (doubaoKey as any).value !== 'your-doubao-api-key-here') {
+      if (doubaoKey && (doubaoKey as { value: string }).value && (doubaoKey as { value: string }).value !== 'your-doubao-api-key-here') {
         const doubaoModelResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('DOUBAO_MODEL');
-        configuredModel = (doubaoModelResult && (doubaoModelResult as any).value) ? (doubaoModelResult as any).value : 'doubao-4o';
+        configuredModel = (doubaoModelResult && (doubaoModelResult as { value: string }).value) ? (doubaoModelResult as { value: string }).value : 'doubao-4o';
       } else {
         // 检查OpenAI
         const openaiKeyResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('OPENAI_API_KEY');
-        if (openaiKeyResult && (openaiKeyResult as any).value && (openaiKeyResult as any).value !== 'your-openai-api-key-here') {
+        if (openaiKeyResult && (openaiKeyResult as { value: string }).value && (openaiKeyResult as { value: string }).value !== 'your-openai-api-key-here') {
           const openaiModelResult = db.prepare('SELECT value FROM settings WHERE key = ?').get('OPENAI_MODEL');
-          configuredModel = (openaiModelResult && (openaiModelResult as any).value) ? (openaiModelResult as any).value : 'gpt-4o';
+          configuredModel = (openaiModelResult && (openaiModelResult as { value: string }).value) ? (openaiModelResult as { value: string }).value : 'gpt-4o';
         }
       }
       
@@ -393,13 +339,13 @@ router.delete('/api-keys/:provider', (req: Request, res: Response) => {
           WHERE is_preset = 1
         `);
         const result = updateStmt.run(configuredModel);
-        safeLog(`✅ Updated ${(result as any).changes} preset agents with model: ${configuredModel} (after deleting one provider)`);
+        safeLog(`✅ Updated ${(result as { changes: number }).changes} preset agents with model: ${configuredModel} (after deleting one provider)`);
       }
     }
 
     safeLog(`✅ API configuration deleted for provider: ${provider}`);
     res.json({ success: true, message: 'Configuration deleted' });
-  } catch (error) {
+  } catch (error: unknown) {
     safeError('❌ Failed to delete configuration:', error);
     res.status(500).json({ success: false, error: 'Failed to delete configuration' });
   }

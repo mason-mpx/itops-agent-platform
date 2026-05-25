@@ -29,6 +29,9 @@ import copilotRoutes from './routes/copilotRoutes';
 import alertNoiseRoutes from './routes/alertNoiseRoutes';
 import rootCauseAnalysisRoutes from './routes/rootCauseAnalysisRoutes';
 import multiAgentRoutes from './routes/multiAgentRoutes';
+import serverGroupRoutes from './routes/serverGroupRoutes';
+import serverManagementRoutes from './routes/serverManagementRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
 import { schedulerService } from './services/schedulerService';
 import { reportService } from './services/reportService';
 import { copilotService } from './services/copilotService';
@@ -99,6 +102,8 @@ app.use('/api/reports', rateLimiter, reportRoutes);
 app.use('/api/settings', rateLimiter, settingsRoutes);
 app.use('/api/servers', rateLimiter, serverRoutes);
 app.use('/api/server-commands', rateLimiter, serverCommandRoutes);
+app.use('/api/server-groups', rateLimiter, serverGroupRoutes);
+app.use('/api/server-management', rateLimiter, serverManagementRoutes);
 app.use('/api/scripts', rateLimiter, scriptRoutes);
 app.use('/api/audit', rateLimiter, auditRoutes);
 app.use('/api/notifications', rateLimiter, notificationRoutes);
@@ -109,6 +114,7 @@ app.use('/api/notification-config', rateLimiter, notificationConfigRoutes);
 app.use('/api/alert-noise', rateLimiter, alertNoiseRoutes);
 app.use('/api/root-cause-analysis', rateLimiter, rootCauseAnalysisRoutes);
 app.use('/api/multi-agent', rateLimiter, multiAgentRoutes);
+app.use('/api/dashboard', rateLimiter, dashboardRoutes);
 
 app.use(errorHandler);
 

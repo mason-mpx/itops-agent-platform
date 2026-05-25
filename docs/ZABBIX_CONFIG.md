@@ -454,9 +454,9 @@ item_key: {ITEM.KEY}
 
 ## 相关文档
 
-- [API 文档](../README.md#webhook-告警接收-api)
-- [工作流配置](./WORKFLOW_GUIDE.md)
-- [告警管理](./ALERTS_GUIDE.md)
+- [API 文档](./API.md) — 完整 API 接口文档，包含 Webhook 告警接收接口
+- [工作流管理](./API.md#工作流管理) — 工作流配置和管理 API
+- [告警管理](./API.md#告警管理) — 告警处理和降噪 API
 
 ---
 
@@ -470,4 +470,4 @@ item_key: {ITEM.KEY}
 
 ---
 
-**最后更新**: 2024-05-18
+**最后更新**: 2026-05-25

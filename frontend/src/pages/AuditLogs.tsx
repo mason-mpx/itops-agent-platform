@@ -20,7 +20,7 @@ interface AuditLog {
 }
 
 export default function AuditLogs() {
-  const [page, setPage] = useState(1);
+  const [page] = useState(1);
   const [limit] = useState(20);
   const [selectedAction, setSelectedAction] = useState('');
   const [selectedResource, setSelectedResource] = useState('');

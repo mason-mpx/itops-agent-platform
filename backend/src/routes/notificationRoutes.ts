@@ -17,7 +17,7 @@ router.get('/', (req: Request, res: Response) => {
     } = req.query;
     
     let query = 'SELECT * FROM notifications WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (type) {
       query += ' AND type = ?';

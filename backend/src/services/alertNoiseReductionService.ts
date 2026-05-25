@@ -1,6 +1,5 @@
-﻿import db from '../models/database';
-import { logger } from '../utils/logger';
-import { randomUUID } from 'crypto';
+import db from '../models/database';
+import { randomUUID, createHash } from 'crypto';
 
 interface AlertNoiseRecord {
   id: string;
@@ -18,14 +17,10 @@ interface AlertNoiseRecord {
 class AlertNoiseReductionService {
   // 计算告警指纹（用于去重）
   generateFingerprint(source: string, title: string, _content?: string): string {
-    // 简化版指纹：源 + 标题（去除数字和特殊字符）
     const normalizedTitle = title.toLowerCase().replace(/[\d\s_-]+/g, ' ').trim();
     const normalizedSource = source.toLowerCase();
     const fingerprint = `${normalizedSource}:${normalizedTitle}`;
-    return require('crypto')
-      .createHash('md5')
-      .update(fingerprint)
-      .digest('hex');
+    return createHash('md5').update(fingerprint).digest('hex');
   }
 
   // 处理新告警，检查是否需要降噪
@@ -133,7 +128,7 @@ class AlertNoiseReductionService {
         SUM(CASE WHEN is_suppressed = 1 THEN 1 ELSE 0 END) as suppressed,
         SUM(occurrence_count - 1) as duplicates
       FROM alert_noise_reduction
-    `).get() as any;
+    `).get() as { total: number; suppressed: number; duplicates: number } | undefined;
 
     const total = stats?.total || 0;
     const suppressed = stats?.suppressed || 0;
@@ -155,12 +150,27 @@ class AlertNoiseReductionService {
       WHERE is_suppressed = 1 
       ORDER BY last_occurrence DESC 
       LIMIT 50
-    `).all() as any[];
+    `).all() as Array<{
+      id: string;
+      alert_title: string;
+      alert_content: string;
+      alert_fingerprint: string;
+      occurrence_count: number;
+      first_occurrence: string;
+      last_occurrence: string;
+      is_suppressed: number;
+      suppression_until: string | null;
+    }>;
 
     return records.map(r => ({
-      ...r,
+      id: r.id,
+      alert_fingerprint: r.alert_fingerprint,
+      alert_source: '',
+      alert_title: r.alert_title,
+      occurrence_count: r.occurrence_count,
       first_occurrence: new Date(r.first_occurrence),
       last_occurrence: new Date(r.last_occurrence),
+      is_suppressed: Boolean(r.is_suppressed),
       suppression_until: r.suppression_until ? new Date(r.suppression_until) : undefined
     }));
   }

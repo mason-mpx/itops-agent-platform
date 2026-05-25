@@ -13,8 +13,8 @@ router.get('/', (_req: Request, res: Response) => {
       ORDER BY am.created_at DESC
     `).all();
     res.json({ success: true, data: mappings });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to fetch alert workflow mappings' });
   }
 });
 
@@ -33,8 +33,8 @@ router.get('/:id', (req: Request, res: Response) => {
     }
     
     res.json({ success: true, data: mapping });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to fetch alert workflow mapping' });
   }
 });
 
@@ -59,8 +59,8 @@ router.post('/', (req: Request, res: Response) => {
     `).run(id, alert_source || null, alert_severity || null, alert_title_pattern || null, workflow_id, enabled ? 1 : 0);
     
     res.status(201).json({ success: true, data: { id, alert_source, alert_severity, alert_title_pattern, workflow_id, enabled } });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to create alert workflow mapping' });
   }
 });
 
@@ -82,7 +82,7 @@ router.put('/:id', (req: Request, res: Response) => {
     }
     
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (alert_source !== undefined) {
       updates.push('alert_source = ?');
@@ -111,8 +111,8 @@ router.put('/:id', (req: Request, res: Response) => {
     }
     
     res.json({ success: true, message: 'Alert workflow mapping updated' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to update alert workflow mapping' });
   }
 });
 
@@ -122,13 +122,13 @@ router.delete('/:id', (req: Request, res: Response) => {
     
     const result = db.prepare('DELETE FROM alert_workflow_mappings WHERE id = ?').run(id);
     
-    if ((result as any).changes === 0) {
+    if ((result as { changes: number }).changes === 0) {
       return res.status(404).json({ success: false, error: 'Alert workflow mapping not found' });
     }
     
     res.json({ success: true, message: 'Alert workflow mapping deleted' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: (error as Error).message });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to delete alert workflow mapping' });
   }
 });
 

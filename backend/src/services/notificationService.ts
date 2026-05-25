@@ -1,10 +1,44 @@
-﻿import db, { getIOInstance } from '../models/database';
+import db, { getIOInstance } from '../models/database';
 import { logger } from '../utils/logger';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 
+interface NotificationDB {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  recipient: string;
+  related_alert_id: string | null;
+  related_task_id: string | null;
+}
+
+interface NotificationConfig {
+  wechat_enabled?: boolean;
+  wechat_config?: { webhook_url?: string };
+  dingtalk_enabled?: boolean;
+  dingtalk_config?: { webhook_url?: string };
+  email_enabled?: boolean;
+  email_config?: { smtp_host?: string; smtp_port?: number; user?: string; password?: string };
+  webhook_enabled?: boolean;
+}
+
+interface AlertRecord {
+  id: string;
+  severity: string;
+  title: string;
+  content: string;
+  source: string;
+}
+
+interface TaskRecord {
+  id: string;
+  name: string;
+  workflow_id: string | null;
+}
+
 class NotificationService {
-  private config: any = null;
+  private config: NotificationConfig | null = null;
   private initialized: boolean = false;
 
   constructor() {
@@ -18,16 +52,20 @@ class NotificationService {
   private ensureInitialized() {
     if (this.initialized) return;
     try {
-      const configs = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('notification_%') as any[];
-      this.config = {};
-      configs.forEach((c: any) => {
+      const configs = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('notification_%') as Array<{
+        key: string;
+        value: string;
+      }>;
+      const configData: Record<string, unknown> = {};
+      configs.forEach((c) => {
         const key = c.key.replace('notification_', '');
         try {
-          this.config[key] = JSON.parse(c.value);
+          configData[key] = JSON.parse(c.value);
         } catch {
-          this.config[key] = c.value;
+          configData[key] = c.value;
         }
       });
+      this.config = configData as NotificationConfig;
       this.initialized = true;
     } catch (error) {
       logger.error('Failed to load notification config:', error);
@@ -37,16 +75,20 @@ class NotificationService {
   private loadConfig() {
     this.ensureInitialized();
     try {
-      const configs = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('notification_%') as any[];
-      this.config = {};
-      configs.forEach((c: any) => {
+      const configs = db.prepare('SELECT * FROM settings WHERE key LIKE ?').all('notification_%') as Array<{
+        key: string;
+        value: string;
+      }>;
+      const configData: Record<string, unknown> = {};
+      configs.forEach((c) => {
         const key = c.key.replace('notification_', '');
         try {
-          this.config[key] = JSON.parse(c.value);
+          configData[key] = JSON.parse(c.value);
         } catch {
-          this.config[key] = c.value;
+          configData[key] = c.value;
         }
       });
+      this.config = configData as NotificationConfig;
     } catch (error) {
       logger.error('Failed to load notification config:', error);
     }
@@ -85,16 +127,17 @@ class NotificationService {
       await this.send(notification);
       db.prepare('UPDATE notifications SET status = ?, sent_at = ? WHERE id = ?').run('sent', now, id);
       return { success: true, id };
-    } catch (error: any) {
-      db.prepare('UPDATE notifications SET status = ?, error_message = ? WHERE id = ?').run('failed', error.message, id);
-      return { success: false, error: error.message, id };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      db.prepare('UPDATE notifications SET status = ?, error_message = ? WHERE id = ?').run('failed', errorMessage, id);
+      return { success: false, error: errorMessage, id };
     }
   }
 
-  private async send(notification: any) {
+  private async send(notification: { type: string; title: string; content: string }) {
     this.loadConfig(); // 重新加载最新配置
 
-    const promises: Promise<any>[] = [];
+    const promises: Promise<void>[] = [];
 
     // 企业微信通知
     if (this.config?.wechat_enabled) {
@@ -119,7 +162,7 @@ class NotificationService {
     await Promise.allSettled(promises);
   }
 
-  private async sendWeChat(notification: any) {
+  private async sendWeChat(notification: { type: string; title: string; content: string }) {
     const wechatConfig = this.config?.wechat_config;
     if (!wechatConfig?.webhook_url) {
       throw new Error('WeChat webhook URL not configured');
@@ -137,7 +180,7 @@ class NotificationService {
     });
   }
 
-  private async sendDingTalk(notification: any) {
+  private async sendDingTalk(notification: { type: string; title: string; content: string }) {
     const dingtalkConfig = this.config?.dingtalk_config;
     if (!dingtalkConfig?.webhook_url) {
       throw new Error('DingTalk webhook URL not configured');
@@ -156,7 +199,7 @@ class NotificationService {
     });
   }
 
-  private async sendEmail(notification: any) {
+  private async sendEmail(notification: { type: string; title: string; content: string }) {
     const emailConfig = this.config?.email_config;
     if (!emailConfig?.smtp_host) {
       throw new Error('Email SMTP not configured');
@@ -167,7 +210,7 @@ class NotificationService {
     logger.info('Email config:', emailConfig);
   }
 
-  private async sendWebhook(notification: any) {
+  private async sendWebhook(notification: { type: string; title: string; content: string }) {
     const io = getIOInstance();
     if (io) {
       io.emit('notification', {
@@ -181,7 +224,7 @@ class NotificationService {
   }
 
   // 快捷方法：发送告警通知
-  async sendAlertNotification(alert: any) {
+  async sendAlertNotification(alert: AlertRecord) {
     const severityEmoji = {
       critical: '🔴',
       high: '🟠',
@@ -203,7 +246,7 @@ class NotificationService {
   }
 
   // 快捷方法：发送任务状态通知
-  async sendTaskNotification(task: any, status: string) {
+  async sendTaskNotification(task: TaskRecord, status: string) {
     const statusEmoji = {
       completed: '✅',
       failed: '❌',
@@ -248,7 +291,7 @@ class NotificationService {
       SELECT * FROM notifications 
       WHERE status = 'failed'
       ORDER BY created_at DESC
-    `).all() as any[];
+    `).all() as NotificationDB[];
 
     const results = [];
     for (const notification of failed) {
@@ -256,9 +299,9 @@ class NotificationService {
         type: notification.type,
         title: notification.title,
         content: notification.content,
-        recipient: notification.recipient,
-        related_alert_id: notification.related_alert_id,
-        related_task_id: notification.related_task_id
+        recipient: notification.recipient || undefined,
+        related_alert_id: notification.related_alert_id || undefined,
+        related_task_id: notification.related_task_id || undefined
       });
       results.push(result);
     }

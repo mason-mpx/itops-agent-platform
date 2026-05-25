@@ -1,14 +1,24 @@
-﻿import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import db from '../models/database';
 import { logger } from '../utils/logger';
 import { callDoubaoAPI } from './llmService';
+
+interface AgentDB {
+  id: string;
+  name: string;
+  role?: string;
+  description?: string;
+  system_prompt?: string;
+  temperature?: number;
+  enabled?: number;
+}
 
 interface AgentCollaborationContext {
   taskId: string;
   currentAgentId: string;
   currentAgentName: string;
   conversationHistory: CollaborationMessage[];
-  context: Record<string, any>;
+  context: Record<string, unknown>;
   startTime: number;
 }
 
@@ -17,7 +27,7 @@ interface CollaborationMessage {
   name?: string;
   content: string;
   timestamp: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 class MultiAgentOrchestrator {
@@ -25,7 +35,7 @@ class MultiAgentOrchestrator {
   private maxRounds: number = 10;
   private maxThinkingTime: number = 5 * 60 * 1000; // 5分钟
 
-  constructor(taskId: string, initialContext: Record<string, any> = {}) {
+  constructor(taskId: string, initialContext: Record<string, unknown> = {}) {
     this.context = {
       taskId,
       currentAgentId: '',
@@ -41,7 +51,7 @@ class MultiAgentOrchestrator {
    */
   async routeToBestAgent(
     userQuery: string,
-    availableAgents: any[]
+    availableAgents: AgentDB[]
   ): Promise<string> {
     if (availableAgents.length === 0) {
       throw new Error('No agents available');
@@ -84,8 +94,8 @@ ${agentDescriptions}
       }
 
       // 如果没有匹配到，返回第一个启用的Agent
-      return availableAgents.find((a: any) => a.enabled)?.id || availableAgents[0].id;
-    } catch (error) {
+      return availableAgents.find((a) => a.enabled)?.id || availableAgents[0].id;
+    } catch {
       logger.error('Agent routing failed, falling back to first agent');
       return availableAgents[0].id;
     }
@@ -140,11 +150,11 @@ ${agentDescriptions}
     }
 
     // 智能选择主要负责Agent
-    const primaryAgentId = await this.routeToBestAgent(initialQuery, agents as any[]);
+    const primaryAgentId = await this.routeToBestAgent(initialQuery, agents as AgentDB[]);
     this.context.currentAgentId = primaryAgentId;
     
-    const primaryAgent = agents.find(a => (a as any).id === primaryAgentId);
-    this.context.currentAgentName = (primaryAgent as any).name;
+    const primaryAgent = agents.find(a => (a as AgentDB).id === primaryAgentId);
+    this.context.currentAgentName = (primaryAgent as AgentDB)?.name || 'Unknown';
 
     // 开始协作对话
     let currentRound = 0;
@@ -164,15 +174,15 @@ ${agentDescriptions}
       }
 
       // 当前Agent处理
-      const result = await this.processAgentTurn(agents as any[]);
+      const result = await this.processAgentTurn(agents as AgentDB[]);
       
       if (result.type === 'final') {
         shouldContinue = false;
       } else if (result.type === 'delegate') {
         // 委托给其他Agent
         this.context.currentAgentId = result.delegateTo || '';
-        const nextAgent = agents.find(a => (a as any).id === result.delegateTo);
-        this.context.currentAgentName = (nextAgent as any)?.name || 'Unknown';
+        const nextAgent = agents.find(a => (a as AgentDB).id === result.delegateTo);
+        this.context.currentAgentName = (nextAgent as AgentDB)?.name || 'Unknown';
       }
 
       // 检查是否需要继续
@@ -189,7 +199,7 @@ ${agentDescriptions}
    * 单个Agent的处理回合
    */
   private async processAgentTurn(
-    agents: any[]
+    agents: AgentDB[]
   ): Promise<{ type: 'continue' | 'final' | 'delegate', delegateTo?: string }> {
     const currentAgent = agents.find(a => a.id === this.context.currentAgentId);
     if (!currentAgent) {
@@ -235,9 +245,15 @@ ${agentDescriptions}
   /**
    * 从知识库检索相关信息
    */
-  private async retrieveRelevantKnowledge(query: string): Promise<any[]> {
+  private async retrieveRelevantKnowledge(query: string): Promise<Array<{ score: number; [key: string]: unknown }>> {
     try {
-      const allKnowledge = db.prepare('SELECT * FROM knowledge_base ORDER BY usage_count DESC LIMIT 20').all();
+      const allKnowledge = db.prepare('SELECT * FROM knowledge_base ORDER BY usage_count DESC LIMIT 20').all() as Array<{
+        id: string;
+        title: string;
+        content: string;
+        category: string;
+        usage_count: number;
+      }>;
       
       if (allKnowledge.length === 0) return [];
 
@@ -245,7 +261,7 @@ ${agentDescriptions}
       const queryLower = query.toLowerCase();
       const keywords = queryLower.split(/\s+/).filter(k => k.length > 2);
 
-      const scoredKnowledge = (allKnowledge as any[]).map(k => {
+      const scoredKnowledge = allKnowledge.map(k => {
         const searchFields = `${k.title} ${k.content} ${k.category}`.toLowerCase();
         let score = 0;
         
@@ -272,7 +288,7 @@ ${agentDescriptions}
   /**
    * 格式化对话历史供Agent使用
    */
-  private formatConversationForAgent(currentAgent: any): string {
+  private formatConversationForAgent(currentAgent: AgentDB): string {
     const formatted = this.context.conversationHistory.map(msg => {
       const prefix = msg.name ? `[${msg.name}]` : msg.role;
       return `${prefix}: ${msg.content}`;
@@ -293,7 +309,7 @@ ${formatted}
    */
   private parseAgentResponse(
     response: string,
-    agents: any[]
+    agents: AgentDB[]
   ): { type: 'continue' | 'final' | 'delegate', delegateTo?: string } {
     
     // 检查是否任务完成
@@ -402,7 +418,7 @@ class AgentMessageBus {
     fromAgent: string,
     toAgent: string,
     content: string,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ) {
     const key = `${fromAgent}:${toAgent}`;
     if (!this.messages.has(key)) {

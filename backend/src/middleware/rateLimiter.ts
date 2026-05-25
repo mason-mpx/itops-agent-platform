@@ -54,12 +54,17 @@ export function rateLimiter(req: Request, res: Response, next: NextFunction) {
   // 获取或创建条目
   let entry = rateLimitStore.get(key);
   if (!entry || now > entry.resetTime) {
+    // 如果条目不存在，先清理过期条目
+    if (!entry) {
+      cleanupRateLimitStore();
+    }
+    
+    // 如果仍然超过限制，删除最早的条目
     if (!entry && rateLimitStore.size >= MAX_STORE_SIZE) {
-      for (const [storeKey, storeEntry] of rateLimitStore.entries()) {
-        if (now > storeEntry.resetTime) {
-          rateLimitStore.delete(storeKey);
-        }
-      }
+      // 尝试清理过期条目
+      cleanupRateLimitStore();
+      
+      // 如果仍然超限，删除最早的一个条目
       if (rateLimitStore.size >= MAX_STORE_SIZE) {
         const oldestKey = rateLimitStore.keys().next().value;
         if (oldestKey) {
@@ -67,6 +72,7 @@ export function rateLimiter(req: Request, res: Response, next: NextFunction) {
         }
       }
     }
+    
     entry = {
       count: 0,
       resetTime: now + config.windowMs

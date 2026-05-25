@@ -1,4 +1,4 @@
-﻿import crypto from 'crypto';
+import crypto from 'crypto';
 import { randomUUID } from 'crypto';
 import db from '../models/database';
 import { logger } from '../utils/logger';
@@ -11,23 +11,23 @@ const IV_LENGTH = 16; // 128 bits
 // 获取或生成加密密钥
 function getOrCreateEncryptionKey(): Buffer {
   // 先尝试从数据库获取活跃密钥
-  const activeKey = db.prepare('SELECT key_value FROM encryption_keys WHERE key_type = ? AND active = 1 LIMIT 1').get('aes-256-gcm') as any;
+  const activeKey = db.prepare('SELECT key_value FROM encryption_keys WHERE key_type = ? AND active = 1 LIMIT 1').get('aes-256-gcm') as { key_value: string } | undefined;
   
-  if (activeKey) {
-    return Buffer.from(activeKey.key_value, 'base64');
+  if (!activeKey) {
+    logger.info('🔐 No active encryption key found, generating new one');
+    const newKey = crypto.randomBytes(KEY_LENGTH);
+    const keyId = randomUUID();
+    
+    db.prepare(`
+      INSERT INTO encryption_keys (id, key_type, key_value, active)
+      VALUES (?, ?, ?, 1)
+    `).run(keyId, 'aes-256-gcm', newKey.toString('base64'));
+    
+    logger.info('🔐 Generated new encryption key');
+    return newKey;
   }
   
-  // 如果没有活跃密钥，生成新的
-  const newKey = crypto.randomBytes(KEY_LENGTH);
-  const keyId = randomUUID();
-  
-  db.prepare(`
-    INSERT INTO encryption_keys (id, key_type, key_value, active)
-    VALUES (?, ?, ?, 1)
-  `).run(keyId, 'aes-256-gcm', newKey.toString('base64'));
-  
-  logger.info('🔐 Generated new encryption key');
-  return newKey;
+  return Buffer.from(activeKey.key_value, 'base64');
 }
 
 let _encryptionKey: Buffer | null = null;
@@ -101,31 +101,40 @@ export function rotateEncryptionKey(): void {
     private_key: server.private_key ? decryptWithKey(server.private_key, oldKey) : null
   }));
   
-  // 标记旧密钥为非活跃
-  db.prepare('UPDATE encryption_keys SET active = 0 WHERE key_type = ?').run('aes-256-gcm');
+  // 使用事务包装所有数据库操作，确保原子性
+  const rotateTransaction = db.transaction(() => {
+    // 标记旧密钥为非活跃
+    db.prepare('UPDATE encryption_keys SET active = 0 WHERE key_type = ?').run('aes-256-gcm');
+    
+    // 插入新密钥
+    db.prepare(`
+      INSERT INTO encryption_keys (id, key_type, key_value, active)
+      VALUES (?, ?, ?, 1)
+    `).run(newKeyId, 'aes-256-gcm', newKey.toString('base64'));
+    
+    // 使用新密钥重新加密并更新数据库
+    const updateStmt = db.prepare(`
+      UPDATE servers 
+      SET password = ?, private_key = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    
+    for (const server of decryptedServers) {
+      updateStmt.run(
+        server.password ? encryptWithKey(server.password, newKey) : null,
+        server.private_key ? encryptWithKey(server.private_key, newKey) : null,
+        server.id
+      );
+    }
+  });
   
-  // 插入新密钥
-  db.prepare(`
-    INSERT INTO encryption_keys (id, key_type, key_value, active)
-    VALUES (?, ?, ?, 1)
-  `).run(newKeyId, 'aes-256-gcm', newKey.toString('base64'));
-  
-  // 使用新密钥重新加密并更新数据库
-  const updateStmt = db.prepare(`
-    UPDATE servers 
-    SET password = ?, private_key = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-  
-  for (const server of decryptedServers) {
-    updateStmt.run(
-      server.password ? encryptWithKey(server.password, newKey) : null,
-      server.private_key ? encryptWithKey(server.private_key, newKey) : null,
-      server.id
-    );
+  try {
+    rotateTransaction();
+    logger.info('🔄 Encryption key rotated successfully');
+  } catch (error) {
+    logger.error('❌ Encryption key rotation failed, all changes rolled back:', error);
+    throw error;
   }
-  
-  logger.info('🔄 Encryption key rotated successfully');
 }
 
 function encryptWithKey(plaintext: string, key: Buffer): string {

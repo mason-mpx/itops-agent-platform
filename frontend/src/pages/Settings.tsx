@@ -8,7 +8,6 @@ import api from '../lib/api';
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('api');
   const queryClient = useQueryClient();
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const { theme, toggleTheme } = useTheme();
   
   // API密钥本地状态

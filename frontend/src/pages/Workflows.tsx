@@ -1,10 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   GitBranch, Play, Clock, Plus, Edit, Server,
   Search, Filter, Copy, Trash2, XCircle,
   Zap, Shield, Database, Globe, Cpu, AlertTriangle,
-  ArrowRight, Sparkles, ArrowRightCircle, CheckCircle
+  ArrowRight, Sparkles, CheckCircle
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -298,7 +298,7 @@ export default function Workflows() {
             <div className="bg-surface rounded-xl p-6 w-full max-w-lg mx-4">
               <h3 className="text-xl font-bold text-text-primary mb-2">选择服务器</h3>
               <p className="text-text-secondary mb-4">
-                请选择要在哪些服务器上执行工作流 "{selectedWorkflowForServer.name}"
+                请选择要在哪些服务器上执行工作流 &quot;{selectedWorkflowForServer.name}&quot;
               </p>
               
               {/* Selection Controls */}
@@ -521,7 +521,6 @@ export default function Workflows() {
                               });
                               
                               // 找到起始节点（没有入边的节点）
-                              const nodeIds = new Set((workflow.nodes || []).map(n => n.id));
                               const targetIds = new Set((workflow.edges || []).map(e => e.target));
                               const startNodes = (workflow.nodes || []).filter(n => !targetIds.has(n.id));
                               

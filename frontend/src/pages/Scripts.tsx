@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileCode, Plus, Edit, Trash2, Play, Search, Tag, Code } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -39,7 +39,7 @@ export default function Scripts() {
   const { data: scripts } = useQuery({
     queryKey: ['scripts', search, selectedCategory],
     queryFn: async () => {
-      const params: any = {};
+      const params: Record<string, string> = {};
       if (search) params.search = search;
       if (selectedCategory) params.category = selectedCategory;
       const res = await api.get('/api/scripts', { params });
@@ -309,7 +309,9 @@ export default function Scripts() {
 
 function ScriptModal({ script, categories, onClose }: { script: Script | null, categories: string[], onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [paramsInput, setParamsInput] = useState('');
+  const [paramsInput, setParamsInput] = useState(
+    script?.parameters ? JSON.stringify(script.parameters, null, 2) : ''
+  );
   const [formData, setFormData] = useState({
     name: script?.name || '',
     description: script?.description || '',
@@ -318,14 +320,8 @@ function ScriptModal({ script, categories, onClose }: { script: Script | null, c
     category: script?.category || '',
   });
 
-  useEffect(() => {
-    if (script?.parameters) {
-      setParamsInput(JSON.stringify(script.parameters, null, 2));
-    }
-  }, [script]);
-
   const mutation = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: Pick<Script, 'name' | 'description' | 'type' | 'content' | 'category'>) => {
       let params;
       try {
         params = paramsInput ? JSON.parse(paramsInput) : [];

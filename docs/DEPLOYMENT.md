@@ -32,10 +32,8 @@ cp .env.example .env
 ```env
 NODE_ENV=production
 PORT=3001
-ENCRYPTION_KEY=your-secret-key-here-min-32-chars
 JWT_SECRET=your-jwt-secret-here
-DOUBAN_API_KEY=your-douban-api-key
-ENABLE_MOCK_MODE=false
+DOUBAO_API_KEY=your-doubao-api-key
 ```
 
 ### 3. 构建并启动
@@ -118,15 +116,13 @@ npm run dev
 | NODE_ENV | 运行环境 | production | 否 |
 | PORT | 后端端口 | 3001 | 否 |
 | DATABASE_PATH | 数据库路径 | ./data/app.db | 否 |
-| ENCRYPTION_KEY | 加密密钥 | - | 是（生产） |
-| JWT_SECRET | JWT密钥 | - | 是（生产） |
-| DOUBAN_API_KEY | 豆包API密钥 | - | 否 |
-| DOUBAN_API_BASE | 豆包API地址 | https://ark.cn-beijing.volces.com/api/v3 | 否 |
-| DOUBAN_MODEL | 豆包模型 | doubao-4o | 否 |
+| JWT_SECRET | JWT密钥 | 开发环境自动生成 | 是（生产） |
+| DOUBAO_API_KEY | 豆包API密钥 | - | 否 |
+| DOUBAO_API_BASE | 豆包API地址 | https://ark.cn-beijing.volces.com/api/v3 | 否 |
+| DOUBAO_MODEL | 豆包模型 | doubao-4o | 否 |
 | OPENAI_API_KEY | OpenAI API密钥 | - | 否 |
 | OPENAI_API_BASE | OpenAI API地址 | https://api.openai.com/v1 | 否 |
 | OPENAI_MODEL | OpenAI模型 | gpt-4o | 否 |
-| ENABLE_MOCK_MODE | 模拟模式 | true | 否 |
 | ALLOWED_ORIGINS | CORS允许源 | http://localhost:80,http://localhost:3000,http://localhost:8080 | 否 |
 
 ### 端口配置
@@ -297,4 +293,4 @@ docker volume rm itops-agent-platform_app-data
 2. 添加您的服务器
 3. 配置通知渠道
 4. 设置告警自动处理规则
-5. 参考 [使用手册](../QUICKSTART.md) 了解更多功能
+5. 参考 [项目 README](../README.md) 了解更多功能

@@ -4,10 +4,18 @@ import db from '../models/database';
 import { env } from '../utils/env';
 import { tokenBlacklist } from '../services/tokenBlacklist';
 
-const userCache = new Map<string, { user: any; expiresAt: number }>();
+interface AuthUser {
+  id: string;
+  username: string;
+  email: string | null;
+  role: string;
+  enabled: number;
+}
+
+const userCache = new Map<string, { user: AuthUser; expiresAt: number }>();
 const USER_CACHE_TTL = 60 * 1000;
 
-function getCachedUser(userId: string): any | null {
+function getCachedUser(userId: string): AuthUser | null {
   const cached = userCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.user;
@@ -18,7 +26,7 @@ function getCachedUser(userId: string): any | null {
   return null;
 }
 
-function setCachedUser(userId: string, user: any): void {
+function setCachedUser(userId: string, user: AuthUser): void {
   userCache.set(userId, { user, expiresAt: Date.now() + USER_CACHE_TTL });
   if (userCache.size > 1000) {
     const oldestKey = userCache.keys().next().value;
@@ -36,8 +44,7 @@ export function clearUserCache(userId?: string): void {
   }
 }
 
-// JWT认证中间件
-export function authenticateToken(req: Request & { user?: any }, res: Response, next: NextFunction) {
+export function authenticateToken(req: Request & { user?: AuthUser }, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -49,7 +56,6 @@ export function authenticateToken(req: Request & { user?: any }, res: Response, 
 
   const token = authHeader.substring(7);
 
-  // 检查token是否在黑名单中
   if (tokenBlacklist.isBlacklisted(token)) {
     return res.status(401).json({
       success: false,
@@ -58,12 +64,13 @@ export function authenticateToken(req: Request & { user?: any }, res: Response, 
   }
 
   try {
-    const decoded = (jwt.verify as any)(token, env.JWT_SECRET) as any;
+    const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] }) as jwt.JwtPayload & { id: string };
     
-    let user = getCachedUser(decoded.id);
+    let user: AuthUser | null = getCachedUser(decoded.id);
     if (!user) {
-      user = db.prepare('SELECT id, username, email, role, enabled FROM users WHERE id = ?').get(decoded.id) as any;
-      if (user) {
+      const dbUser = db.prepare('SELECT id, username, email, role, enabled FROM users WHERE id = ?').get(decoded.id) as AuthUser | undefined;
+      if (dbUser) {
+        user = dbUser;
         setCachedUser(decoded.id, user);
       }
     }
@@ -82,7 +89,6 @@ export function authenticateToken(req: Request & { user?: any }, res: Response, 
       });
     }
 
-    // 将用户信息附加到请求对象
     req.user = user;
     next();
   } catch (error) {
@@ -99,9 +105,8 @@ export function authenticateToken(req: Request & { user?: any }, res: Response, 
   }
 }
 
-// 角色认证中间件
 export function requireRole(...allowedRoles: string[]) {
-  return (req: Request & { user?: any }, res: Response, next: NextFunction) => {
+  return (req: Request & { user?: AuthUser }, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({
         success: false,

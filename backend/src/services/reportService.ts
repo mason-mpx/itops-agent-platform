@@ -32,8 +32,41 @@ export interface GeneratedReport {
   type: 'incident' | 'inspection' | 'change';
   content: string;
   format: 'markdown' | 'pdf' | 'word';
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
+}
+
+interface ReportTemplateDB {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  content: string;
+  variables: string;
+  is_preset: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ReportDB {
+  id: string;
+  name: string;
+  content: string;
+  format: string;
+  task_id: string | null;
+  created_at: string;
+}
+
+interface ScheduledReportDB {
+  id: string;
+  name: string;
+  template_id: string;
+  cron_expression: string;
+  enabled: number;
+  recipients: string;
+  format: string;
+  created_at: string;
+  updated_at: string;
 }
 
 class ReportService {
@@ -149,14 +182,14 @@ class ReportService {
   init() {
     try {
       this.initializePresetTemplates();
-    } catch (e) {
-      console.log("⚠️  ReportService initialization failed:", (e as Error).message);
+    } catch {
+      console.error("⚠️  ReportService initialization failed");
     }
   }
 
   private initializePresetTemplates() {
     try {
-      const existingCount = db.prepare('SELECT COUNT(*) as count FROM report_templates WHERE is_preset = 1').get() as any;
+      const existingCount = db.prepare('SELECT COUNT(*) as count FROM report_templates WHERE is_preset = 1').get() as { count: number };
       if (existingCount.count === 0) {
         for (const template of this.presetTemplates) {
           db.prepare(`
@@ -172,27 +205,40 @@ class ReportService {
             1
           );
         }
-        console.log('✅ 预设报告模板初始化完成');
       }
-    } catch (e) {
-      console.log("⚠️  Could not initialize report templates:", (e as Error).message);
+    } catch {
+      console.error("⚠️  Could not initialize report templates");
     }
   }
 
   getTemplates(): ReportTemplate[] {
-    const templates = db.prepare('SELECT * FROM report_templates ORDER BY is_preset DESC, created_at DESC').all() as any[];
+    const templates = db.prepare('SELECT * FROM report_templates ORDER BY is_preset DESC, created_at DESC').all() as ReportTemplateDB[];
     return templates.map(t => ({
-      ...t,
-      variables: JSON.parse(t.variables || '[]')
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      type: t.type as ReportTemplate['type'],
+      content: t.content,
+      variables: JSON.parse(t.variables || '[]'),
+      is_preset: Boolean(t.is_preset),
+      created_at: t.created_at,
+      updated_at: t.updated_at
     }));
   }
 
   getTemplate(id: string): ReportTemplate | null {
-    const template = db.prepare('SELECT * FROM report_templates WHERE id = ?').get(id) as any;
+    const template = db.prepare('SELECT * FROM report_templates WHERE id = ?').get(id) as ReportTemplateDB | undefined;
     if (!template) return null;
     return {
-      ...template,
-      variables: JSON.parse(template.variables || '[]')
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      type: template.type as ReportTemplate['type'],
+      content: template.content,
+      variables: JSON.parse(template.variables || '[]'),
+      is_preset: Boolean(template.is_preset),
+      created_at: template.created_at,
+      updated_at: template.updated_at
     };
   }
 
@@ -221,7 +267,7 @@ class ReportService {
     if (!existing) return null;
 
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     if (template.name !== undefined) { updates.push('name = ?'); params.push(template.name); }
     if (template.description !== undefined) { updates.push('description = ?'); params.push(template.description); }
     if (template.content !== undefined) { updates.push('content = ?'); params.push(template.content); }
@@ -280,21 +326,34 @@ class ReportService {
 
   getReports(limit = 20): GeneratedReport[] {
     // 从两个表中获取所有报告：generated_reports（模板生成）和 reports（工作流执行）
-    const generatedReports = db.prepare('SELECT * FROM generated_reports ORDER BY created_at DESC LIMIT ?').all(limit) as any[];
-    const workflowReports = db.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT ?').all(limit) as any[];
+    const generatedReports = db.prepare('SELECT * FROM generated_reports ORDER BY created_at DESC LIMIT ?').all(limit) as Array<{
+      id: string;
+      name: string;
+      type: string;
+      content: string;
+      format: string;
+      metadata: string;
+      created_at: string;
+    }>;
+    const workflowReports = db.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT ?').all(limit) as ReportDB[];
     
     // 合并并转换格式
     const allReports = [
       ...generatedReports.map(r => ({
-        ...r,
-        metadata: JSON.parse(r.metadata || '{}')
+        id: r.id,
+        name: r.name,
+        type: r.type as GeneratedReport['type'],
+        content: r.content,
+        format: r.format as GeneratedReport['format'],
+        metadata: JSON.parse(r.metadata || '{}'),
+        created_at: r.created_at
       })),
       ...workflowReports.map(r => ({
         id: r.id,
         name: r.name,
-        type: 'inspection', // 默认类型
+        type: 'inspection' as const,
         content: r.content,
-        format: r.format,
+        format: r.format as GeneratedReport['format'],
         metadata: { task_id: r.task_id },
         created_at: r.created_at
       }))
@@ -309,25 +368,38 @@ class ReportService {
 
   getReport(id: string): GeneratedReport | null {
     // 先从 generated_reports 查找
-    let report = db.prepare('SELECT * FROM generated_reports WHERE id = ?').get(id) as any;
-    if (report) {
-      return {
-        ...report,
-        metadata: JSON.parse(report.metadata || '{}')
-      };
-    }
-    
-    // 如果没找到，再从 reports 表查找
-    report = db.prepare('SELECT * FROM reports WHERE id = ?').get(id) as any;
+    const report = db.prepare('SELECT * FROM generated_reports WHERE id = ?').get(id) as {
+      id: string;
+      name: string;
+      type: string;
+      content: string;
+      format: string;
+      metadata: string;
+      created_at: string;
+    } | undefined;
     if (report) {
       return {
         id: report.id,
         name: report.name,
-        type: 'inspection',
+        type: report.type as GeneratedReport['type'],
         content: report.content,
-        format: report.format,
-        metadata: { task_id: report.task_id },
+        format: report.format as GeneratedReport['format'],
+        metadata: JSON.parse(report.metadata || '{}'),
         created_at: report.created_at
+      };
+    }
+    
+    // 如果没找到，再从 reports 表查找
+    const workflowReport = db.prepare('SELECT * FROM reports WHERE id = ?').get(id) as ReportDB | undefined;
+    if (workflowReport) {
+      return {
+        id: workflowReport.id,
+        name: workflowReport.name,
+        type: 'inspection' as const,
+        content: workflowReport.content,
+        format: workflowReport.format as GeneratedReport['format'],
+        metadata: { task_id: workflowReport.task_id },
+        created_at: workflowReport.created_at
       };
     }
     
@@ -335,11 +407,17 @@ class ReportService {
   }
 
   getScheduledReports(): ScheduledReport[] {
-    const reports = db.prepare('SELECT * FROM scheduled_reports ORDER BY created_at DESC').all() as any[];
+    const reports = db.prepare('SELECT * FROM scheduled_reports ORDER BY created_at DESC').all() as ScheduledReportDB[];
     return reports.map(r => ({
-      ...r,
+      id: r.id,
+      name: r.name,
+      template_id: r.template_id,
+      cron_expression: r.cron_expression,
       recipients: JSON.parse(r.recipients || '[]'),
-      enabled: Boolean(r.enabled)
+      format: r.format as ScheduledReport['format'],
+      enabled: Boolean(r.enabled),
+      created_at: r.created_at,
+      updated_at: r.updated_at
     }));
   }
 
@@ -364,12 +442,18 @@ class ReportService {
   }
 
   getScheduledReport(id: string): ScheduledReport | null {
-    const report = db.prepare('SELECT * FROM scheduled_reports WHERE id = ?').get(id) as any;
+    const report = db.prepare('SELECT * FROM scheduled_reports WHERE id = ?').get(id) as ScheduledReportDB | undefined;
     if (!report) return null;
     return {
-      ...report,
+      id: report.id,
+      name: report.name,
+      template_id: report.template_id,
+      cron_expression: report.cron_expression,
       recipients: JSON.parse(report.recipients || '[]'),
-      enabled: Boolean(report.enabled)
+      format: report.format as ScheduledReport['format'],
+      enabled: Boolean(report.enabled),
+      created_at: report.created_at,
+      updated_at: report.updated_at
     };
   }
 
@@ -378,7 +462,7 @@ class ReportService {
     if (!existing) return null;
 
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     if (report.name !== undefined) { updates.push('name = ?'); params.push(report.name); }
     if (report.template_id !== undefined) { updates.push('template_id = ?'); params.push(report.template_id); }
     if (report.cron_expression !== undefined) { updates.push('cron_expression = ?'); params.push(report.cron_expression); }

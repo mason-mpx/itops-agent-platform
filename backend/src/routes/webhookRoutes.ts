@@ -59,7 +59,7 @@ function findAndTriggerWorkflow(alertId: string, source: string, severity: strin
       AND (alert_severity = ? OR alert_severity IS NULL)
     `).all(source, severity);
     
-    const matchingMappings = (mappings as any[]).filter(mapping => {
+    const matchingMappings = (mappings as Array<{ alert_title_pattern?: string; workflow_id: string }>).filter(mapping => {
       if (!mapping.alert_title_pattern) return true;
       try {
         return title.includes(mapping.alert_title_pattern);

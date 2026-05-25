@@ -629,6 +629,113 @@ Content-Type: application/json
 }
 ```
 
+## 仪表盘
+
+### 获取仪表盘数据
+```http
+GET /api/dashboard
+Authorization: Bearer <token>
+```
+
+### 获取告警趋势
+```http
+GET /api/dashboard/alert-trends
+Authorization: Bearer <token>
+
+# 查询参数
+?days=7
+```
+
+### 获取任务统计
+```http
+GET /api/dashboard/task-stats
+Authorization: Bearer <token>
+```
+
+## 服务器分组管理
+
+### 获取分组列表
+```http
+GET /api/server-groups
+Authorization: Bearer <token>
+```
+
+### 创建分组
+```http
+POST /api/server-groups
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "生产环境",
+  "description": "生产环境服务器",
+  "parentId": null,
+  "sortOrder": 1
+}
+```
+
+### 更新分组
+```http
+PUT /api/server-groups/:id
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "更新后的名称",
+  "description": "新描述"
+}
+```
+
+### 删除分组
+```http
+DELETE /api/server-groups/:id
+Authorization: Bearer <token>
+```
+
+### 获取分组下的服务器
+```http
+GET /api/server-groups/:id/servers
+Authorization: Bearer <token>
+```
+
+### 添加服务器到分组
+```http
+POST /api/server-groups/:id/servers
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "serverId": "server-uuid"
+}
+```
+
+### 从分组移除服务器
+```http
+DELETE /api/server-groups/:id/servers/:serverId
+Authorization: Bearer <token>
+```
+
+## 多 Agent 协作
+
+### 创建多 Agent 任务
+```http
+POST /api/multi-agent
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "agentIds": ["agent-1", "agent-2"],
+  "task": "任务描述",
+  "collaborationMode": "sequential"
+}
+```
+
+### 获取多 Agent 任务状态
+```http
+GET /api/multi-agent/:id
+Authorization: Bearer <token>
+```
+
 ## 健康检查
 
 ```http

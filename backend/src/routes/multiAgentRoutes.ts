@@ -119,7 +119,7 @@ router.get('/templates', (_req: Request, res: Response) => {
       success: true,
       data: PRESET_COLLABORATION_TEMPLATES
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       error: '获取模板失败'
@@ -150,7 +150,7 @@ router.post('/collaborate/from-template', async (req: Request, res: Response) =>
       )
     `).all(
       ...template.agentRoles.flatMap(role => [role, `%${role}%`])
-    ) as any[];
+    ) as Array<Record<string, unknown>>;
 
     const agentIds = [
       ...matchingAgents.map(a => a.id),
@@ -186,7 +186,7 @@ router.post('/collaborate/from-template', async (req: Request, res: Response) =>
       console.error('模板协作执行失败:', error);
     }
 
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       error: '创建协作失败'
@@ -391,7 +391,7 @@ router.get('/history', (req: Request, res: Response) => {
       success: true,
       data: history
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       error: '获取历史记录失败'

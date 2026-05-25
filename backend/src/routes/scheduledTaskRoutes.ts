@@ -4,6 +4,15 @@ import { randomUUID } from 'crypto';
 import { createAuditLog } from '../services/auditService';
 import { schedulerService } from '../services/schedulerService';
 
+interface ScheduledTaskRecord {
+  id: string;
+  name: string;
+  description?: string;
+  schedule: string;
+  workflow_id: string;
+  enabled: number;
+}
+
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
@@ -80,7 +89,7 @@ router.post('/', (req: Request, res: Response) => {
       action: 'create_scheduled_task',
       resource_type: 'scheduled_task',
       resource_id: id,
-      details: JSON.stringify({ name, workflow_id, schedule })
+      details: { name, workflow_id, schedule }
     });
     
     res.status(201).json({ success: true, data: { id, name, description, workflow_id, schedule, enabled } });
@@ -107,7 +116,7 @@ router.put('/:id', (req: Request, res: Response) => {
     }
     
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (name) {
       updates.push('name = ?');
@@ -138,7 +147,7 @@ router.put('/:id', (req: Request, res: Response) => {
     }
     
     // 更新调度器
-    const updatedTask = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+    const updatedTask = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as ScheduledTaskRecord;
     schedulerService.updateTask(updatedTask);
     
     createAuditLog({
@@ -146,7 +155,7 @@ router.put('/:id', (req: Request, res: Response) => {
       action: 'update_scheduled_task',
       resource_type: 'scheduled_task',
       resource_id: id,
-      details: JSON.stringify({ name, workflow_id, schedule, enabled })
+      details: { name, workflow_id, schedule, enabled }
     });
     
     res.json({ success: true, message: 'Scheduled task updated' });
@@ -164,7 +173,8 @@ router.delete('/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Scheduled task not found' });
     }
     
-    // 从调度器中删�?    schedulerService.deleteTask(id);
+    // 从调度器中删除
+    schedulerService.deleteTask(id);
     
     db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
     
@@ -173,7 +183,7 @@ router.delete('/:id', (req: Request, res: Response) => {
       action: 'delete_scheduled_task',
       resource_type: 'scheduled_task',
       resource_id: id,
-      details: JSON.stringify({ name: (task as any).name })
+      details: { name: (task as { name: string }).name }
     });
     
     res.json({ success: true, message: 'Scheduled task deleted' });
@@ -186,24 +196,22 @@ router.post('/:id/toggle', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as { enabled: number };
     if (!task) {
       return res.status(404).json({ success: false, error: 'Scheduled task not found' });
     }
     
-    const newEnabled = !(task as any).enabled ? 1 : 0;
+    const newEnabled = !task.enabled ? 1 : 0;
     db.prepare('UPDATE scheduled_tasks SET enabled = ?, updated_at = ? WHERE id = ?').run(newEnabled, new Date().toISOString(), id);
     
-    // 更新调度器
-    const updatedTask = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
-    schedulerService.updateTask(updatedTask);
+    schedulerService.updateTask(db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as ScheduledTaskRecord);
     
     createAuditLog({
       user_id: 'system',
       action: 'toggle_scheduled_task',
       resource_type: 'scheduled_task',
       resource_id: id,
-      details: JSON.stringify({ enabled: !!newEnabled })
+      details: { enabled: !!newEnabled }
     });
     
     res.json({ success: true, data: { enabled: !!newEnabled } });
@@ -216,12 +224,17 @@ router.post('/:id/run', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id);
+    const task = db.prepare('SELECT id, name, workflow_id, schedule, enabled FROM scheduled_tasks WHERE id = ?').get(id) as {
+      id: string;
+      name: string;
+      workflow_id: string;
+      schedule: string;
+      enabled: number;
+    };
     if (!task) {
       return res.status(404).json({ success: false, error: 'Scheduled task not found' });
     }
     
-    // 立即执行任务
     schedulerService.executeWorkflow(task);
     
     createAuditLog({
@@ -229,7 +242,7 @@ router.post('/:id/run', (req: Request, res: Response) => {
       action: 'manual_run_scheduled_task',
       resource_type: 'scheduled_task',
       resource_id: id,
-      details: JSON.stringify({ name: (task as any).name, manual_run: true })
+      details: { name: task.name, manual_run: true }
     });
     
     res.json({ success: true, message: 'Task triggered manually' });

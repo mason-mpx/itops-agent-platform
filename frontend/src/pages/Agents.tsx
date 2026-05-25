@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Plus, Edit, Trash2, Play, Clock, Search, 
-  Terminal, Activity, ChevronLeft, BookOpen, Server, Settings
+  ChevronLeft, BookOpen, Server
 } from 'lucide-react';
 import clsx from 'clsx';
 import api from '../lib/api';
@@ -171,225 +171,12 @@ export default function Agents() {
 
   const filteredAgents = agents || [];
 
-  // AgentDetail component with access to parent state
-  const AgentDetailInner = ({ agentId, onBack }: { agentId: string; onBack: () => void }) => {
-    const { data: agent, isLoading: agentLoading } = useQuery({
-      queryKey: ['agents', agentId],
-      queryFn: async () => {
-        const res = await api.get(`/api/agents/${agentId}`);
-        return res.data.data as Agent;
-      },
-    });
-
-    const { data: executions, isLoading: executionsLoading } = useQuery({
-      queryKey: ['agents', agentId, 'executions'],
-      queryFn: async () => {
-        const res = await api.get(`/api/agents/${agentId}/executions`, { params: { limit: 30 } });
-        return res.data.data as { executions: AgentExecution[], pagination: any };
-      },
-    });
-
-    if (agentLoading) {
-      return (
-        <div className="h-full flex items-center justify-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        </div>
-      );
-    }
-
-    if (!agent) return null;
-
-    return (
-      <div className="h-full overflow-auto p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={onBack}
-                className="p-2 hover:bg-background rounded-lg transition-all"
-              >
-                <ChevronLeft className="w-5 h-5 text-text-secondary" />
-              </button>
-              <div>
-                <h1 className="text-2xl font-bold text-text-primary flex items-center gap-3">
-                  <span className="text-3xl">{agent.avatar}</span>
-                  {agent.name}
-                </h1>
-                <p className="text-text-secondary">{agent.role}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Agent Info */}
-          <div className="bg-surface rounded-xl p-6 border border-border">
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div>
-                  <span className="text-sm text-text-secondary block mb-1">分类</span>
-                  <span className="text-text-primary">{agent.category || '-'}</span>
-                </div>
-                <div>
-                  <span className="text-sm text-text-secondary block mb-1">模型</span>
-                  <span className="text-text-primary font-medium">{agent.model}</span>
-                </div>
-                <div>
-                  <span className="text-sm text-text-secondary block mb-1">温度</span>
-                  <span className="text-text-primary">{agent.temperature}</span>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <span className="text-sm text-text-secondary block mb-1">使用次数</span>
-                  <span className="text-text-primary font-medium">{agent.usage_count || 0}</span>
-                </div>
-                <div>
-                  <span className="text-sm text-text-secondary block mb-1">最后使用</span>
-                  <span className="text-text-primary">
-                    {agent.last_used_at ? new Date(agent.last_used_at).toLocaleString() : '-'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-sm text-text-secondary block mb-1">状态</span>
-                  <span className={clsx(
-                    "px-2 py-1 rounded-full text-xs font-medium",
-                    agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-status-failed/10 text-status-failed'
-                  )}>
-                    {agent.enabled ? '在线' : '离线'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Tags */}
-            {agent.tags && agent.tags.length > 0 && (
-              <div className="mt-6 pt-4 border-t border-border">
-                <span className="text-sm text-text-secondary block mb-2">标签</span>
-                <div className="flex flex-wrap gap-2">
-                  {agent.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-3 py-1 bg-background rounded-full text-sm text-text-secondary"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* System Prompt */}
-            {agent.system_prompt && (
-              <div className="mt-6 pt-4 border-t border-border">
-                <span className="text-sm text-text-secondary block mb-2">系统提示词</span>
-                <div className="bg-background rounded-lg p-4">
-                  <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
-                    {agent.system_prompt}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Execution History */}
-          <div className="bg-surface rounded-xl p-6 border border-border">
-            <h2 className="text-lg font-bold text-text-primary mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-text-secondary" />
-              执行历史
-            </h2>
-            
-            {executionsLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            ) : (!executions || executions.executions.length === 0) ? (
-              <div className="text-center py-12 text-text-secondary">
-                <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>暂无执行记录</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {executions.executions.map((exec) => (
-                  <div key={exec.id} className="bg-background rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <span className={clsx(
-                          "px-2 py-1 rounded-full text-xs font-medium",
-                          exec.status === 'success' 
-                            ? 'bg-status-success/10 text-status-success'
-                            : 'bg-status-failed/10 text-status-failed'
-                        )}>
-                          {exec.status === 'success' ? '成功' : '失败'}
-                        </span>
-                        <span className="text-sm text-text-secondary">
-                          {new Date(exec.created_at).toLocaleString()}
-                        </span>
-                      </div>
-                      <span className="text-xs text-text-secondary">
-                        {exec.execution_time_ms}ms
-                      </span>
-                    </div>
-                    <div className="mb-3">
-                      <span className="text-xs text-text-secondary block mb-1">输入:</span>
-                      <p className="text-sm text-text-primary">{exec.input_text}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-text-secondary block mb-1">输出:</span>
-                      <pre className="text-sm text-text-primary whitespace-pre-wrap max-h-40 overflow-y-auto">
-                        {exec.output_text}
-                      </pre>
-                    </div>
-                    {exec.error_message && (
-                      <div className="mt-2">
-                        <span className="text-xs text-status-warning block mb-1">错误:</span>
-                        <p className="text-sm text-status-failed">{exec.error_message}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          
-          {/* Action Buttons */}
-          <div className="bg-surface rounded-xl p-6 border border-border">
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setEditingAgent(agent);
-                  setShowDetail(null);
-                  setShowModal(true);
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all"
-              >
-                <Edit className="w-4 h-4" />
-                编辑 Agent
-              </button>
-              {agent.is_preset !== 1 && (
-                <button
-                  onClick={() => {
-                    if (confirm(`确定要删除Agent "${agent.name}" 吗？`)) {
-                      deleteMutation.mutate(agent.id);
-                      onBack();
-                    }
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 bg-status-failed/10 text-status-failed rounded-lg hover:bg-status-failed/20 transition-all"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  删除 Agent
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   if (showDetail) {
     return (
       <AgentDetailInner 
         agentId={showDetail} 
         onBack={() => setShowDetail(null)} 
+        deleteMutation={deleteMutation}
       />
     );
   }
@@ -726,6 +513,219 @@ export default function Agents() {
     </div>
   );
 }
+
+interface AgentDetailInnerProps {
+  agentId: string;
+  onBack: () => void;
+  deleteMutation: { mutate: (id: string) => void };
+}
+
+function AgentDetailInner({ agentId, onBack, deleteMutation }: AgentDetailInnerProps) {
+  const { data: agent, isLoading: agentLoading } = useQuery({
+    queryKey: ['agents', agentId],
+    queryFn: async () => {
+      const res = await api.get(`/api/agents/${agentId}`);
+      return res.data.data as Agent;
+    },
+  });
+
+  const { data: executions, isLoading: executionsLoading } = useQuery({
+    queryKey: ['agents', agentId, 'executions'],
+    queryFn: async () => {
+      const res = await api.get(`/api/agents/${agentId}/executions`, { params: { limit: 30 } });
+      return res.data.data as { executions: AgentExecution[], pagination: any };
+    },
+  });
+
+  if (agentLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (!agent) return null;
+
+  return (
+    <div className="h-full overflow-auto p-6">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onBack}
+              className="p-2 hover:bg-background rounded-lg transition-all"
+            >
+              <ChevronLeft className="w-5 h-5 text-text-secondary" />
+            </button>
+            <div>
+              <h1 className="text-2xl font-bold text-text-primary flex items-center gap-3">
+                <span className="text-3xl">{agent.avatar}</span>
+                {agent.name}
+              </h1>
+              <p className="text-text-secondary">{agent.role}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-surface rounded-xl p-6 border border-border">
+          <div className="grid grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <span className="text-sm text-text-secondary block mb-1">分类</span>
+                <span className="text-text-primary">{agent.category || '-'}</span>
+              </div>
+              <div>
+                <span className="text-sm text-text-secondary block mb-1">模型</span>
+                <span className="text-text-primary font-medium">{agent.model}</span>
+              </div>
+              <div>
+                <span className="text-sm text-text-secondary block mb-1">温度</span>
+                <span className="text-text-primary">{agent.temperature}</span>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <span className="text-sm text-text-secondary block mb-1">使用次数</span>
+                <span className="text-text-primary font-medium">{agent.usage_count || 0}</span>
+              </div>
+              <div>
+                <span className="text-sm text-text-secondary block mb-1">最后使用</span>
+                <span className="text-text-primary">
+                  {agent.last_used_at ? new Date(agent.last_used_at).toLocaleString() : '-'}
+                </span>
+              </div>
+              <div>
+                <span className="text-sm text-text-secondary block mb-1">状态</span>
+                <span className={clsx(
+                  "px-2 py-1 rounded-full text-xs font-medium",
+                  agent.enabled ? 'bg-status-success/10 text-status-success' : 'bg-status-failed/10 text-status-failed'
+                )}>
+                  {agent.enabled ? '在线' : '离线'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {agent.tags && agent.tags.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-border">
+              <span className="text-sm text-text-secondary block mb-2">标签</span>
+              <div className="flex flex-wrap gap-2">
+                {agent.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-3 py-1 bg-background rounded-full text-sm text-text-secondary"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {agent.system_prompt && (
+            <div className="mt-6 pt-4 border-t border-border">
+              <span className="text-sm text-text-secondary block mb-2">系统提示词</span>
+              <div className="bg-background rounded-lg p-4">
+                <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
+                  {agent.system_prompt}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-surface rounded-xl p-6 border border-border">
+          <h2 className="text-lg font-bold text-text-primary mb-4 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-text-secondary" />
+            执行历史
+          </h2>
+          
+          {executionsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (!executions || executions.executions.length === 0) ? (
+            <div className="text-center py-12 text-text-secondary">
+              <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>暂无执行记录</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {executions.executions.map((exec) => (
+                <div key={exec.id} className="bg-background rounded-lg p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className={clsx(
+                        "px-2 py-1 rounded-full text-xs font-medium",
+                        exec.status === 'success' 
+                          ? 'bg-status-success/10 text-status-success'
+                          : 'bg-status-failed/10 text-status-failed'
+                      )}>
+                        {exec.status === 'success' ? '成功' : '失败'}
+                      </span>
+                      <span className="text-sm text-text-secondary">
+                        {new Date(exec.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <span className="text-xs text-text-secondary">
+                      {exec.execution_time_ms}ms
+                    </span>
+                  </div>
+                  <div className="mb-3">
+                    <span className="text-xs text-text-secondary block mb-1">输入:</span>
+                    <p className="text-sm text-text-primary">{exec.input_text}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-text-secondary block mb-1">输出:</span>
+                    <pre className="text-sm text-text-primary whitespace-pre-wrap max-h-40 overflow-y-auto">
+                      {exec.output_text}
+                    </pre>
+                  </div>
+                  {exec.error_message && (
+                    <div className="mt-2">
+                      <span className="text-xs text-status-warning block mb-1">错误:</span>
+                      <p className="text-sm text-status-failed">{exec.error_message}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        
+        <div className="bg-surface rounded-xl p-6 border border-border">
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                onBack();
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all"
+            >
+              <Edit className="w-4 h-4" />
+              编辑 Agent
+            </button>
+            {agent.is_preset !== 1 && (
+              <button
+                onClick={() => {
+                  if (confirm(`确定要删除Agent "${agent.name}" 吗？`)) {
+                    deleteMutation.mutate(agent.id);
+                    onBack();
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-status-failed/10 text-status-failed rounded-lg hover:bg-status-failed/20 transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+                删除 Agent
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AgentModal({ agent, onClose }: { agent: Agent | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [tagsInput, setTagsInput] = useState(agent?.tags?.join(', ') || '');

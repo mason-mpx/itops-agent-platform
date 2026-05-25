@@ -1,19 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import db from '../models/database';
+import { WorkflowParsed } from '../types';
 
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
   try {
-    const workflows = db.prepare('SELECT * FROM workflows ORDER BY is_template DESC, created_at DESC').all();
-    workflows.forEach((w: any) => {
+    const workflows = db.prepare('SELECT * FROM workflows ORDER BY is_template DESC, created_at DESC').all() as Array<{ nodes?: string; edges?: string; agent_configs?: string; [key: string]: unknown }>;
+    workflows.forEach((w) => {
       if (w.nodes) w.nodes = JSON.parse(w.nodes);
       if (w.edges) w.edges = JSON.parse(w.edges);
       if (w.agent_configs) w.agent_configs = JSON.parse(w.agent_configs);
     });
     res.json({ success: true, data: workflows });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch workflows' });
   }
 });
@@ -24,12 +25,12 @@ router.get('/:id', (req: Request, res: Response) => {
     if (!workflow) {
       return res.status(404).json({ success: false, error: 'Workflow not found' });
     }
-    const w = workflow as any;
-    if (w.nodes) w.nodes = JSON.parse(w.nodes);
-    if (w.edges) w.edges = JSON.parse(w.edges);
-    if (w.agent_configs) w.agent_configs = JSON.parse(w.agent_configs);
+    const w = workflow as Record<string, unknown>;
+    if (w.nodes) w.nodes = JSON.parse(w.nodes as string);
+    if (w.edges) w.edges = JSON.parse(w.edges as string);
+    if (w.agent_configs) w.agent_configs = JSON.parse(w.agent_configs as string);
     res.json({ success: true, data: workflow });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch workflow' });
   }
 });
@@ -54,7 +55,7 @@ router.post('/', (req: Request, res: Response) => {
     
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id);
     res.status(201).json({ success: true, data: workflow });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to create workflow' });
   }
 });
@@ -80,7 +81,7 @@ router.put('/:id', (req: Request, res: Response) => {
     
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: workflow });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to update workflow' });
   }
 });
@@ -94,7 +95,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     
     db.prepare('DELETE FROM workflows WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Workflow deleted successfully' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to delete workflow' });
   }
 });
@@ -121,7 +122,7 @@ router.post('/import', (req: Request, res: Response) => {
     
     const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id);
     res.status(201).json({ success: true, data: workflow });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to import workflow' });
   }
 });
@@ -133,17 +134,21 @@ router.get('/export/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Workflow not found' });
     }
     
-    const w = workflow as any;
-    const exportData = {
-      name: w.name,
-      description: w.description,
-      nodes: JSON.parse(w.nodes || '[]'),
-      edges: JSON.parse(w.edges || '[]'),
-      agent_configs: JSON.parse(w.agent_configs || '{}')
+    const w = workflow as Record<string, unknown>;
+    const exportData: WorkflowParsed = {
+      id: '',
+      name: w.name as string,
+      description: w.description as string,
+      nodes: JSON.parse((w.nodes as string) || '[]'),
+      edges: JSON.parse((w.edges as string) || '[]'),
+      agent_configs: JSON.parse((w.agent_configs as string) || '{}'),
+      is_template: 0,
+      created_at: '',
+      updated_at: ''
     };
     
     res.json({ success: true, data: exportData });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to export workflow' });
   }
 });

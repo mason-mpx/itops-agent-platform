@@ -1,8 +1,18 @@
-﻿import { scheduleJob, Job } from 'node-schedule';
+import { scheduleJob, Job } from 'node-schedule';
 import { randomUUID } from 'crypto';
 import db from '../models/database';
 import { logger } from '../utils/logger';
 import { executeWorkflow } from './workflowExecutor';
+import { WorkflowParsed, WorkflowNode, WorkflowEdge } from '../types';
+
+interface ScheduledTaskRecord {
+  id: string;
+  name: string;
+  description?: string;
+  schedule: string;
+  workflow_id: string;
+  enabled: number;
+}
 
 class SchedulerService {
   private jobs: Map<string, Job> = new Map();
@@ -18,7 +28,7 @@ class SchedulerService {
     
     try {
       // 从数据库加载所有启用的定时任务
-      const tasks = db.prepare('SELECT * FROM scheduled_tasks WHERE enabled = 1').all() as any[];
+      const tasks = db.prepare('SELECT * FROM scheduled_tasks WHERE enabled = 1').all() as ScheduledTaskRecord[];
       
       tasks.forEach(task => {
         this.scheduleTask(task);
@@ -31,7 +41,7 @@ class SchedulerService {
     }
   }
 
-  scheduleTask(task: any) {
+  scheduleTask(task: ScheduledTaskRecord) {
     // 先取消已存在的任务
     this.cancelTask(task.id);
 
@@ -79,12 +89,12 @@ class SchedulerService {
         `).run(nextRun.toISOString(), task.id);
       }
 
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error(`❌ Failed to schedule task ${task.name}:`, error);
     }
   }
 
-  async executeWorkflow(task: any) {
+  async executeWorkflow(task: ScheduledTaskRecord) {
     try {
       const workflowId = task.workflow_id;
       
@@ -97,7 +107,17 @@ class SchedulerService {
       this.runningWorkflows.add(workflowId);
 
       // 获取工作流信息
-      const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflowId) as any;
+      const workflow = db.prepare('SELECT * FROM workflows WHERE id = ?').get(workflowId) as {
+        id: string;
+        name: string;
+        description: string;
+        nodes: string;
+        edges: string;
+        agent_configs: string;
+        is_template: number;
+        created_at: string;
+        updated_at: string;
+      } | undefined;
       
       if (!workflow) {
         logger.error(`Workflow ${workflowId} not found for scheduled task ${task.name}`);
@@ -113,10 +133,23 @@ class SchedulerService {
 
       logger.info(`✅ Created task ${taskId} for workflow ${workflow.name}`);
       
-      // 真正执行工作流
-      await executeWorkflow(taskId, workflow);
+      // 解析工作流数据
+      const parsedWorkflow: WorkflowParsed = {
+        id: workflow.id,
+        name: workflow.name,
+        description: workflow.description,
+        nodes: typeof workflow.nodes === 'string' ? JSON.parse(workflow.nodes) as WorkflowNode[] : workflow.nodes,
+        edges: typeof workflow.edges === 'string' ? JSON.parse(workflow.edges) as WorkflowEdge[] : workflow.edges,
+        agent_configs: workflow.agent_configs ? (typeof workflow.agent_configs === 'string' ? JSON.parse(workflow.agent_configs) as Record<string, unknown> : workflow.agent_configs) : {},
+        is_template: workflow.is_template,
+        created_at: workflow.created_at,
+        updated_at: workflow.updated_at
+      };
       
-    } catch (error) {
+      // 真正执行工作流
+      await executeWorkflow(taskId, parsedWorkflow);
+      
+    } catch (error: unknown) {
       logger.error(`❌ Error executing scheduled workflow:`, error);
     } finally {
       this.runningWorkflows.delete(task.workflow_id);
@@ -132,7 +165,7 @@ class SchedulerService {
     }
   }
 
-  updateTask(task: any) {
+  updateTask(task: ScheduledTaskRecord) {
     if (task.enabled) {
       this.scheduleTask(task);
     } else {

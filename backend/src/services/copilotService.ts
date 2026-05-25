@@ -1,4 +1,4 @@
-﻿import db from '../models/database';
+import db from '../models/database';
 import { logger } from '../utils/logger';
 import { callDoubaoAPI, checkLLMAvailability } from './llmService';
 import { randomUUID } from 'crypto';
@@ -37,6 +37,9 @@ const COPILOT_SYSTEM_PROMPT = `你是一个专业的 IT 运维助手（ITOps Cop
 class CopilotService {
   private conversations: Map<string, Conversation> = new Map();
   private initialized: boolean = false;
+  private readonly MAX_CONVERSATIONS = 1000;
+  private readonly CONVERSATION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     // 延迟初始化，等待数据库准备好
@@ -46,6 +49,60 @@ class CopilotService {
     if (this.initialized) return;
     this.loadConversations();
     this.initialized = true;
+    this.startCleanupTimer();
+  }
+
+  private startCleanupTimer() {
+    if (this.cleanupInterval) return;
+    
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupExpiredConversations();
+    }, 60 * 60 * 1000); // 每小时清理一次
+    
+    this.cleanupInterval.unref();
+  }
+
+  private cleanupExpiredConversations() {
+    const now = new Date();
+    let cleanedCount = 0;
+    
+    for (const [id, conversation] of this.conversations.entries()) {
+      const updatedAt = new Date(conversation.updated_at);
+      const isExpired = (now.getTime() - updatedAt.getTime()) > this.CONVERSATION_TTL;
+      
+      if (isExpired) {
+        this.conversations.delete(id);
+        try {
+          db.prepare('DELETE FROM copilot_conversations WHERE id = ?').run(id);
+        } catch (error) {
+          logger.error('Failed to delete expired conversation from DB:', error);
+        }
+        cleanedCount++;
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      logger.info(`Cleaned up ${cleanedCount} expired copilot conversations`);
+    }
+  }
+
+  private enforceConversationLimit() {
+    if (this.conversations.size > this.MAX_CONVERSATIONS) {
+      const entries = Array.from(this.conversations.entries())
+        .sort((a, b) => new Date(b[1].updated_at).getTime() - new Date(a[1].updated_at).getTime());
+      
+      const toRemove = entries.slice(this.MAX_CONVERSATIONS);
+      toRemove.forEach(([id]) => {
+        this.conversations.delete(id);
+        try {
+          db.prepare('DELETE FROM copilot_conversations WHERE id = ?').run(id);
+        } catch (error) {
+          logger.error('Failed to remove excess conversation from DB:', error);
+        }
+      });
+      
+      logger.info(`Enforced conversation limit, removed ${toRemove.length} old conversations`);
+    }
   }
 
   private ensureInitialized() {
@@ -56,7 +113,13 @@ class CopilotService {
 
   private loadConversations() {
     try {
-      const saved = db.prepare('SELECT * FROM copilot_conversations').all() as any[];
+      const saved = db.prepare('SELECT * FROM copilot_conversations').all() as Array<{
+        id: string;
+        user_id: string;
+        messages: string;
+        created_at: string;
+        updated_at: string;
+      }>;
       saved.forEach(c => {
         try {
           this.conversations.set(c.id, {
@@ -70,7 +133,7 @@ class CopilotService {
           // 忽略解析错误
         }
       });
-    } catch (error) {
+    } catch {
       logger.info('No existing copilot conversations found');
     }
   }
@@ -91,6 +154,7 @@ class CopilotService {
 
   createConversation(userId: string = 'default'): Conversation {
     this.ensureInitialized();
+    this.enforceConversationLimit();
     const id = randomUUID();
     const now = new Date();
     const conversation: Conversation = {
@@ -166,16 +230,21 @@ class CopilotService {
     // 根据用户输入自动注入相关数据到上下文中
     if (lowerInput.includes('告警') || lowerInput.includes('alert')) {
       try {
-        const alerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 10').all() as any[];
+        const alerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 10').all() as Array<{
+          id: string;
+          severity: string;
+          title: string;
+          status: string;
+        }>;
         const severityCounts: Record<string, number> = {};
         const statusCounts: Record<string, number> = {};
-        alerts.forEach((a: any) => {
+        alerts.forEach((a) => {
           severityCounts[a.severity] = (severityCounts[a.severity] || 0) + 1;
           statusCounts[a.status] = (statusCounts[a.status] || 0) + 1;
         });
         context += `当前告警数据：共 ${alerts.length} 条告警，严重程度分布：${JSON.stringify(severityCounts)}，状态分布：${JSON.stringify(statusCounts)}。\n`;
         if (alerts.length > 0) {
-          context += `最近告警：${alerts.slice(0, 5).map((a: any) => `[${a.severity}] ${a.title}`).join('；')}。\n`;
+          context += `最近告警：${alerts.slice(0, 5).map((a) => `[${a.severity}] ${a.title}`).join('；')}。\n`;
         }
       } catch {
         context += '无法获取告警数据。\n';
@@ -184,11 +253,17 @@ class CopilotService {
 
     if (lowerInput.includes('服务器') || lowerInput.includes('server')) {
       try {
-        const servers = db.prepare('SELECT * FROM servers LIMIT 20').all() as any[];
-        const enabledCount = servers.filter((s: any) => s.enabled).length;
+        const servers = db.prepare('SELECT * FROM servers LIMIT 20').all() as Array<{
+          id: string;
+          name: string;
+          hostname: string;
+          port: number;
+          enabled: number;
+        }>;
+        const enabledCount = servers.filter((s) => s.enabled).length;
         context += `服务器数据：共 ${servers.length} 台服务器，${enabledCount} 台已启用。\n`;
         if (servers.length > 0) {
-          context += `服务器列表：${servers.slice(0, 8).map((s: any) => `${s.name} (${s.hostname}:${s.port})[${s.enabled ? '已启用' : '已禁用'}]`).join('；')}。\n`;
+          context += `服务器列表：${servers.slice(0, 8).map((s) => `${s.name} (${s.hostname}:${s.port})[${s.enabled ? '已启用' : '已禁用'}]`).join('；')}。\n`;
         }
       } catch {
         context += '无法获取服务器数据。\n';
@@ -197,14 +272,18 @@ class CopilotService {
 
     if (lowerInput.includes('任务') || lowerInput.includes('task')) {
       try {
-        const tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT 15').all() as any[];
+        const tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT 15').all() as Array<{
+          id: string;
+          name: string;
+          status: string;
+        }>;
         const statusCounts: Record<string, number> = {};
-        tasks.forEach((t: any) => {
+        tasks.forEach((t) => {
           statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
         });
         context += `任务数据：共 ${tasks.length} 条任务记录，状态分布：${JSON.stringify(statusCounts)}。\n`;
         if (tasks.length > 0) {
-          context += `最近任务：${tasks.slice(0, 5).map((t: any) => `${t.name} (${t.status})`).join('；')}。\n`;
+          context += `最近任务：${tasks.slice(0, 5).map((t) => `${t.name} (${t.status})`).join('；')}。\n`;
         }
       } catch {
         context += '无法获取任务数据。\n';
@@ -242,8 +321,9 @@ class CopilotService {
         );
         // 截断超长响应，防止前端渲染问题
         return llmResponse.length > 4000 ? llmResponse.substring(0, 4000) + '...\n\n（回复过长，已截断）' : llmResponse;
-      } catch (error: any) {
-        logger.warn('LLM call failed, falling back to rule-based response:', error.message);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.warn('LLM call failed, falling back to rule-based response:', errorMessage);
         return this.getRuleBasedResponse(input);
       }
     }
@@ -274,11 +354,16 @@ class CopilotService {
   }
 
   private handleAlertQuery(): string {
-    const alerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 10').all() as any[];
+    const alerts = db.prepare('SELECT * FROM alerts ORDER BY created_at DESC LIMIT 10').all() as Array<{
+      id: string;
+      severity: string;
+      title: string;
+      status: string;
+    }>;
     const severityCounts: Record<string, number> = {};
     const statusCounts: Record<string, number> = {};
 
-    alerts.forEach((a: any) => {
+    alerts.forEach((a) => {
       severityCounts[a.severity] = (severityCounts[a.severity] || 0) + 1;
       statusCounts[a.status] = (statusCounts[a.status] || 0) + 1;
     });
@@ -295,7 +380,7 @@ class CopilotService {
 
     if (alerts.length > 0) {
       response += `**最近告警**:\n`;
-      alerts.slice(0, 5).forEach((a: any, i: number) => {
+      alerts.slice(0, 5).forEach((a, i) => {
         const emoji = a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡';
         response += `${i + 1}. ${emoji} [${a.severity?.toUpperCase()}] ${a.title}\n`;
       });
@@ -306,8 +391,14 @@ class CopilotService {
   }
 
   private handleServerQuery(): string {
-    const servers = db.prepare('SELECT * FROM servers LIMIT 20').all() as any[];
-    const enabledCount = servers.filter((s: any) => s.enabled).length;
+    const servers = db.prepare('SELECT * FROM servers LIMIT 20').all() as Array<{
+      id: string;
+      name: string;
+      hostname: string;
+      port: number;
+      enabled: number;
+    }>;
+    const enabledCount = servers.filter((s) => s.enabled).length;
 
     let response = `🖥️ **服务器管理概览**\n\n`;
     response += `当前共有 **${servers.length}** 台服务器配置\n`;
@@ -316,7 +407,7 @@ class CopilotService {
 
     if (servers.length > 0) {
       response += `**服务器列表**:\n`;
-      servers.slice(0, 8).forEach((s: any, i: number) => {
+      servers.slice(0, 8).forEach((s, i) => {
         const status = s.enabled ? '✅' : '❌';
         response += `${i + 1}. ${status} ${s.name} (${s.hostname}:${s.port})\n`;
       });
@@ -327,10 +418,14 @@ class CopilotService {
   }
 
   private handleTaskQuery(): string {
-    const tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT 15').all() as any[];
+    const tasks = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT 15').all() as Array<{
+      id: string;
+      name: string;
+      status: string;
+    }>;
     const statusCounts: Record<string, number> = {};
 
-    tasks.forEach((t: any) => {
+    tasks.forEach((t) => {
       statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
     });
 
@@ -343,7 +438,7 @@ class CopilotService {
 
     if (tasks.length > 0) {
       response += `**最近任务**:\n`;
-      tasks.slice(0, 5).forEach((t: any, i: number) => {
+      tasks.slice(0, 5).forEach((t, i) => {
         const emoji = t.status === 'completed' ? '✅' : t.status === 'failed' ? '❌' : '⏳';
         response += `${i + 1}. ${emoji} ${t.name} - ${t.status}\n`;
       });

@@ -129,9 +129,9 @@ export default function Knowledge() {
 
               {entry.tags && entry.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-4">
-                  {entry.tags.slice(0, 3).map((tag, i) => (
+                  {entry.tags.slice(0, 3).map((tag) => (
                     <span
-                      key={i}
+                      key={tag}
                       className="px-2 py-1 bg-background rounded text-xs text-text-secondary flex items-center gap-1"
                     >
                       <Tag className="w-3 h-3" />

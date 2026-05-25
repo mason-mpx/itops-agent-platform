@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
-import { Bell, CheckCircle, Clock, AlertCircle, Plus, Zap } from 'lucide-react';
+import { Bell, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import api from '../lib/api';
@@ -16,13 +16,12 @@ interface Alert {
   title: string;
   content: string;
   status: string;
-  metadata: any;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
 export default function Alerts() {
   const { token } = useAuth();
-  const queryClient = useQueryClient();
 
   const { data: alerts, refetch } = useQuery({
     queryKey: ['alerts'],
@@ -42,24 +41,31 @@ export default function Alerts() {
       }
     });
 
-    socket.on('connect', () => {
+    const handleConnect = () => {
       socket.emit('alert:subscribe');
-    });
+    };
 
-    socket.on('alert:new', (data: Alert) => {
+    const handleAlertNew = (data: Alert) => {
       console.log('New alert:', data);
       refetch();
-    });
+    };
 
-    socket.on('alert:updated', () => {
+    const handleAlertUpdated = () => {
       refetch();
-    });
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('alert:new', handleAlertNew);
+    socket.on('alert:updated', handleAlertUpdated);
 
     return () => {
       socket.emit('alert:unsubscribe');
+      socket.off('connect', handleConnect);
+      socket.off('alert:new', handleAlertNew);
+      socket.off('alert:updated', handleAlertUpdated);
       socket.disconnect();
     };
-  }, [refetch]);
+  }, [refetch, token]);
 
   const acknowledgeMutation = useMutation({
     mutationFn: async (alertId: string) => {

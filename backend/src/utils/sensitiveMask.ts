@@ -34,7 +34,7 @@ export function maskPrivateKey(key: string | null | undefined): string {
 /**
  * 深度脱敏对象中的敏感信息
  */
-export function maskSensitiveData(obj: any): any {
+export function maskSensitiveData(obj: unknown): unknown {
   if (!obj) return obj;
   
   if (typeof obj === 'string') {
@@ -46,8 +46,8 @@ export function maskSensitiveData(obj: any): any {
   }
   
   if (typeof obj === 'object') {
-    const masked: any = {};
-    for (const [key, value] of Object.entries(obj)) {
+    const masked: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
       const lowerKey = key.toLowerCase();
       
       // 敏感字段直接脱敏
@@ -59,12 +59,14 @@ export function maskSensitiveData(obj: any): any {
       else if (lowerKey.includes('token') || 
                lowerKey.includes('apikey') || 
                lowerKey.includes('api_key') ||
-               lowerKey.includes('api-key') ||
-               lowerKey.includes('key')) {
+               lowerKey.includes('api-key')) {
         masked[key] = maskApiKey(value as string);
       }
       else if (lowerKey.includes('private') && lowerKey.includes('key')) {
         masked[key] = maskPrivateKey(value as string);
+      }
+      else if (lowerKey.includes('key')) {
+        masked[key] = maskApiKey(value as string);
       }
       // 递归处理
       else {
@@ -80,9 +82,9 @@ export function maskSensitiveData(obj: any): any {
 /**
  * 安全的日志输出函数 - 自动脱敏
  */
-export function safeLog(...args: any[]): void {
+export function safeLog(...args: unknown[]): void {
   const maskedArgs = args.map(arg => {
-    if (typeof arg === 'object') {
+    if (typeof arg === 'object' && arg !== null) {
       return maskSensitiveData(arg);
     }
     return arg;
@@ -90,9 +92,9 @@ export function safeLog(...args: any[]): void {
   console.log(...maskedArgs);
 }
 
-export function safeError(...args: any[]): void {
+export function safeError(...args: unknown[]): void {
   const maskedArgs = args.map(arg => {
-    if (typeof arg === 'object') {
+    if (typeof arg === 'object' && arg !== null) {
       return maskSensitiveData(arg);
     }
     return arg;

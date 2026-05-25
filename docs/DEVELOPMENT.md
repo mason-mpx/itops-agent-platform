@@ -51,8 +51,8 @@ cp .env.example .env
 关键环境变量说明：
 - `NODE_ENV`: 运行环境 (development/production)
 - `PORT`: 后端服务端口
-- `ENABLE_MOCK_MODE`: 是否启用模拟模式 (true/false)
-- `DOUBAN_API_KEY`: 豆包API密钥（生产模式必需）
+- `JWT_SECRET`: JWT 签名密钥（生产模式必填）
+- `DOUBAO_API_KEY`: 豆包API密钥（用于 AI Agent）
 - `OPENAI_API_KEY`: OpenAI API密钥（可选）
 
 ### 4. 启动开发服务

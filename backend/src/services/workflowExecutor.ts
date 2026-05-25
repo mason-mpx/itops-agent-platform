@@ -3,25 +3,32 @@ import db, { getIOInstance } from '../models/database';
 import { logger } from '../utils/logger';
 import { executeAgentNode, getThinkingSteps } from './agentExecutor';
 import { reportService } from './reportService';
+import {
+  WorkflowNode,
+  WorkflowEdge,
+  NodeResult,
+  TaskLogEntry,
+  WorkflowParsed
+} from '../types';
 
 export async function executeWorkflow(
   taskId: string,
-  workflow: any,
+  workflow: WorkflowParsed,
   initialInput?: string,
-  context?: any
+  context?: Record<string, unknown>
 ) {
   const io = getIOInstance();
   const MAX_EXECUTION_DEPTH = 50;
   let executionDepth = 0;
-  let nodeResults: Record<string, any> = {};
-  let nodes: any[] = [];
+  const nodeResults: Record<string, NodeResult> = {};
+  let nodes: WorkflowNode[] = [];
   let executionOrder: string[] = [];
   
   try {
     logger.info('🔄 Starting workflow execution:', { taskId, workflowName: workflow.name, context });
     
-    nodes = JSON.parse(workflow.nodes || '[]');
-    const edges = JSON.parse(workflow.edges || '[]');
+    nodes = Array.isArray(workflow.nodes) ? workflow.nodes : JSON.parse(workflow.nodes as unknown as string || '[]') as WorkflowNode[];
+    const edges = Array.isArray(workflow.edges) ? workflow.edges : JSON.parse(workflow.edges as unknown as string || '[]') as WorkflowEdge[];
     executionOrder = topologicalSort(nodes, edges);
     
     logger.info('📊 Parsed workflow nodes:', nodes);
@@ -37,12 +44,12 @@ export async function executeWorkflow(
         logger.error(`❌ Workflow ${workflow.name} exceeded maximum execution depth`);
         break;
       }
-      const task = db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as any;
+      const task = db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as { status: string } | undefined;
       if (task?.status === 'cancelled') {
         break;
       }
       
-      const node = nodes.find((n: any) => n.id === nodeId);
+      const node = nodes.find((n) => n.id === nodeId);
       if (!node || node.type !== 'agent') continue;
       
       logger.info(`🤖 Processing node ${nodeId}:`, node.data);
@@ -53,7 +60,7 @@ export async function executeWorkflow(
       });
       
       try {
-        const previousResults = Object.values(nodeResults).map((r: any) => r.output).join('\n\n');
+        const previousResults = Object.values(nodeResults).map((r) => r.output).filter(Boolean).join('\n\n');
         const input = previousResults || initialInput || '请开始执行任务';
         
         // 显示思考进度
@@ -95,20 +102,21 @@ export async function executeWorkflow(
         
         addTaskLog(taskId, { type: 'output', content: output, nodeId });
         
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         nodeResults[nodeId] = {
           status: 'failed',
-          error: error.message
+          error: errorMessage
         };
         
         io?.to(`task:${taskId}`).emit('task:node:completed', {
           taskId,
           nodeId,
           status: 'failed',
-          error: error.message
+          error: errorMessage
         });
         
-        addTaskLog(taskId, { type: 'error', content: error.message, nodeId });
+        addTaskLog(taskId, { type: 'error', content: errorMessage, nodeId });
         
         if (!node.data.allowFailure) {
           throw error;
@@ -125,14 +133,14 @@ export async function executeWorkflow(
     
     try {
       const failedNodes = Object.entries(nodeResults)
-        .filter(([_, result]: [string, any]) => result.status === 'failed')
-        .map(([nodeId, result]: [string, any]) => {
-          const node = nodes.find((n: any) => n.id === nodeId);
+        .filter(([_, result]) => result.status === 'failed')
+        .map(([nodeId, result]) => {
+          const node = nodes.find((n) => n.id === nodeId);
           return { ...result, nodeId, node };
         });
       
       if (failedNodes.length > 0) {
-        failedNodes.forEach((nodeResult: any) => {
+        failedNodes.forEach((nodeResult) => {
           const title = `${workflow.name} - 故障案例`;
           const content = `**故障节点**: ${nodeResult.node?.data?.label || nodeResult.nodeId}\n**错误**: ${nodeResult.error}\n**分析时间**: ${new Date().toISOString()}`;
           
@@ -159,7 +167,8 @@ export async function executeWorkflow(
       status: 'completed',
       nodeResults
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     db.prepare(`
       UPDATE tasks 
       SET status = ?, end_time = CURRENT_TIMESTAMP, current_node_id = NULL
@@ -167,23 +176,23 @@ export async function executeWorkflow(
     `).run('failed', taskId);
     
     try {
-      await generateWorkflowExecutionReport(taskId, workflow, nodes, nodeResults, executionOrder, 'failed', error.message);
+      await generateWorkflowExecutionReport(taskId, workflow, nodes, nodeResults, executionOrder, 'failed', errorMessage);
     } catch (reportError) {
       logger.error('Failed to generate workflow report (failed case):', reportError);
     }
     
     io?.to(`task:${taskId}`).emit('task:failed', {
       taskId,
-      error: error.message
+      error: errorMessage
     });
   }
 }
 
 async function generateWorkflowExecutionReport(
   taskId: string,
-  workflow: any,
-  nodes: any[],
-  nodeResults: Record<string, any>,
+  workflow: WorkflowParsed,
+  nodes: WorkflowNode[],
+  nodeResults: Record<string, NodeResult>,
   executionOrder: string[],
   status: 'completed' | 'failed',
   errorMessage?: string
@@ -208,7 +217,7 @@ async function generateWorkflowExecutionReport(
     logger.info('✅ 使用已存在的工作流执行报告模板:', workflowTemplate.id);
   }
   
-  const task = db.prepare('SELECT start_time, end_time FROM tasks WHERE id = ?').get(taskId) as any;
+  const task = db.prepare('SELECT start_time, end_time FROM tasks WHERE id = ?').get(taskId) as { start_time?: string; end_time?: string } | undefined;
   
   const executionOrderDesc = executionOrder.map((nodeId, index) => {
     const node = nodes.find(n => n.id === nodeId);
@@ -235,8 +244,8 @@ async function generateWorkflowExecutionReport(
     return detail;
   }).join('\n\n');
   
-  const successCount = Object.values(nodeResults).filter((r: any) => r.status === 'success').length;
-  const failedCount = Object.values(nodeResults).filter((r: any) => r.status === 'failed').length;
+  const successCount = Object.values(nodeResults).filter((r) => r.status === 'success').length;
+  const failedCount = Object.values(nodeResults).filter((r) => r.status === 'failed').length;
   const totalCount = Object.keys(nodeResults).length;
   
   const executionSummary = `共执行 ${totalCount} 个节点，成功 ${successCount} 个，失败 ${failedCount} 个。`;
@@ -293,7 +302,7 @@ async function generateWorkflowExecutionReport(
   }
 }
 
-function topologicalSort(nodes: any[], edges: any[]): string[] {
+function topologicalSort(nodes: WorkflowNode[], edges: WorkflowEdge[]): string[] {
   const inDegree = new Map<string, number>();
   const adjacency = new Map<string, string[]>();
   
@@ -359,7 +368,7 @@ function topologicalSort(nodes: any[], edges: any[]): string[] {
   return [...result, ...unsortedNodes];
 }
 
-function addTaskLog(taskId: string, log: any) {
+function addTaskLog(taskId: string, log: TaskLogEntry) {
   db.prepare(`
     UPDATE tasks 
     SET logs = json_insert(IFNULL(logs, '[]'), '$[#]', json_object(

@@ -14,7 +14,7 @@ router.get('/', (req: Request, res: Response) => {
   try {
     const { status, severity, limit } = req.query;
     let query = 'SELECT * FROM alerts';
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     const conditions = [];
     if (status && validStatuses.includes(status as string)) {
@@ -40,18 +40,18 @@ router.get('/', (req: Request, res: Response) => {
       }
     }
     
-    const alerts = db.prepare(query).all(...params);
-    alerts.forEach((a: any) => {
+    const alerts = db.prepare(query).all(...params) as Array<{ id: string; metadata?: string; [key: string]: unknown }>;
+    alerts.forEach((a) => {
       if (a.metadata) {
         try {
           a.metadata = JSON.parse(a.metadata);
         } catch {
-          a.metadata = {};
+          a.metadata = '{}';
         }
       }
     });
     res.json({ success: true, data: alerts });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch alerts' });
   }
 });
@@ -65,16 +65,17 @@ router.get('/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
     
-    if ((alert as any).metadata) {
+    const alertObj = alert as { metadata?: string; [key: string]: unknown };
+    if (alertObj.metadata) {
       try {
-        (alert as any).metadata = JSON.parse((alert as any).metadata);
+        alertObj.metadata = JSON.parse(alertObj.metadata);
       } catch {
-        (alert as any).metadata = {};
+        alertObj.metadata = '{}';
       }
     }
     
     res.json({ success: true, data: alert });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch alert' });
   }
 });
@@ -114,19 +115,19 @@ router.post('/', async (req: Request, res: Response) => {
       related_task_id
     );
 
-    const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(id);
-    if (alert && (alert as any).metadata) {
+    const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(id) as { id: string; metadata?: string; title: string; severity: string; content: string; source: string; [key: string]: unknown } | undefined;
+    if (alert && alert.metadata) {
       try {
-        (alert as any).metadata = JSON.parse((alert as any).metadata);
+        alert.metadata = JSON.parse(alert.metadata);
       } catch {
-        (alert as any).metadata = {};
+        alert.metadata = '{}';
       }
     }
 
     // 仅在未被抑制时发送告警通知
     if (noiseCheck.shouldNotify) {
-      notificationService.sendAlertNotification(alert).catch(err => {
-        console.error('Failed to send alert notification:', err);
+      notificationService.sendAlertNotification(alert!).catch(() => {
+        console.error('Failed to send alert notification');
       });
     }
 
@@ -137,7 +138,7 @@ router.post('/', async (req: Request, res: Response) => {
         noiseReduction: noiseCheck
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to create alert' });
   }
 });
@@ -146,7 +147,7 @@ router.put('/:id/acknowledge', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(id);
+    const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(id) as { id: string; title: string; [key: string]: unknown } | undefined;
     if (!alert) {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
@@ -158,11 +159,11 @@ router.put('/:id/acknowledge', (req: Request, res: Response) => {
     // 发送告警确认通知
     notificationService.sendSystemNotification(
       '告警已确认',
-      `告警 "${(alert as any).title}" 已确认处理`
-    ).catch(err => console.error('Failed to send ack notification:', err));
+      `告警 "${alert.title}" 已确认处理`
+    ).catch(() => console.error('Failed to send ack notification'));
     
     res.json({ success: true, data: updated });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to acknowledge alert' });
   }
 });
@@ -171,7 +172,7 @@ router.put('/:id/resolve', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
-    const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(id);
+    const alert = db.prepare('SELECT * FROM alerts WHERE id = ?').get(id) as { id: string; title: string; [key: string]: unknown } | undefined;
     if (!alert) {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
@@ -183,11 +184,11 @@ router.put('/:id/resolve', (req: Request, res: Response) => {
     // 发送告警解决通知
     notificationService.sendSystemNotification(
       '告警已解决',
-      `告警 "${(alert as any).title}" 已解决`
-    ).catch(err => console.error('Failed to send resolve notification:', err));
+      `告警 "${alert.title}" 已解决`
+    ).catch(() => console.error('Failed to send resolve notification'));
     
     res.json({ success: true, data: updated });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to resolve alert' });
   }
 });
@@ -204,7 +205,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     db.prepare('DELETE FROM alerts WHERE id = ?').run(id);
     
     res.json({ success: true, message: 'Alert deleted successfully' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to delete alert' });
   }
 });
@@ -232,10 +233,10 @@ router.get('/stats/summary', (_req: Request, res: Response) => {
       data: {
         byStatus: stats,
         bySeverity: severityStats,
-        total: stats.reduce((sum: number, s: any) => sum + s.count, 0)
+        total: (stats as Array<{ count: number }>).reduce((sum: number, s) => sum + s.count, 0)
       }
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to get alert stats' });
   }
 });

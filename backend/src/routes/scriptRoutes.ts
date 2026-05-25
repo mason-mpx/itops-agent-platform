@@ -8,7 +8,7 @@ router.get('/', (req: Request, res: Response) => {
   try {
     const { category, search } = req.query;
     let query = 'SELECT * FROM scripts WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (category) {
       query += ' AND category = ?';
@@ -23,8 +23,8 @@ router.get('/', (req: Request, res: Response) => {
 
     query += ' ORDER BY created_at DESC';
 
-    const scripts = db.prepare(query).all(...params);
-    const processedScripts = (scripts as any[]).map(script => ({
+    const scripts = db.prepare(query).all(...params) as Array<{ parameters?: string; [key: string]: unknown }>;
+    const processedScripts = scripts.map(script => ({
       ...script,
       parameters: script.parameters ? JSON.parse(script.parameters) : []
     }));
@@ -38,25 +38,25 @@ router.get('/', (req: Request, res: Response) => {
 
 router.get('/categories', (_req: Request, res: Response) => {
   try {
-    const categories = db.prepare('SELECT DISTINCT category FROM scripts WHERE category IS NOT NULL').all() as any[];
+    const categories = db.prepare('SELECT DISTINCT category FROM scripts WHERE category IS NOT NULL').all() as Array<Record<string, unknown>>;
     res.json({ success: true, data: categories.map(c => c.category) });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch categories' });
   }
 });
 
 router.get('/:id', (req: Request, res: Response) => {
   try {
-    const script = db.prepare('SELECT * FROM scripts WHERE id = ?').get(req.params.id);
+    const script = db.prepare('SELECT * FROM scripts WHERE id = ?').get(req.params.id) as { parameters?: string; [key: string]: unknown };
     if (!script) {
       return res.status(404).json({ success: false, error: 'Script not found' });
     }
     const processedScript = {
-      ...script as any,
-      parameters: (script as any).parameters ? JSON.parse((script as any).parameters) : []
+      ...script,
+      parameters: script.parameters ? JSON.parse(script.parameters) : []
     };
     res.json({ success: true, data: processedScript });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to fetch script' });
   }
 });
@@ -79,14 +79,14 @@ router.post('/', (req: Request, res: Response) => {
       category
     );
 
-    const script = db.prepare('SELECT * FROM scripts WHERE id = ?').get(id);
+    const script = db.prepare('SELECT * FROM scripts WHERE id = ?').get(id) as { parameters?: string; [key: string]: unknown };
     const processedScript = {
-      ...script as any,
-      parameters: (script as any).parameters ? JSON.parse((script as any).parameters) : []
+      ...script,
+      parameters: script?.parameters ? JSON.parse(script.parameters) : []
     };
 
     res.status(201).json({ success: true, data: processedScript });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to create script' });
   }
 });
@@ -110,14 +110,14 @@ router.put('/:id', (req: Request, res: Response) => {
       req.params.id
     );
 
-    const script = db.prepare('SELECT * FROM scripts WHERE id = ?').get(req.params.id);
+    const script = db.prepare('SELECT * FROM scripts WHERE id = ?').get(req.params.id) as { parameters?: string; [key: string]: unknown };
     const processedScript = {
-      ...script as any,
-      parameters: (script as any).parameters ? JSON.parse((script as any).parameters) : []
+      ...script,
+      parameters: script?.parameters ? JSON.parse(script.parameters) : []
     };
 
     res.json({ success: true, data: processedScript });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to update script' });
   }
 });
@@ -131,7 +131,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 
     db.prepare('DELETE FROM scripts WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Script deleted successfully' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Failed to delete script' });
   }
 });

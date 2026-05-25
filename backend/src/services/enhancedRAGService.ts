@@ -44,7 +44,7 @@ class EnhancedRAGService {
     } = options;
 
     let sql = 'SELECT * FROM knowledge_base WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (category) {
       sql += ' AND category = ?';
@@ -53,7 +53,16 @@ class EnhancedRAGService {
 
     sql += ' ORDER BY usage_count DESC, created_at DESC LIMIT 50';
 
-    const knowledgeItems = db.prepare(sql).all(...params) as any[];
+    const knowledgeItems = db.prepare(sql).all(...params) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      category: string;
+      tags: string;
+      usage_count: number;
+      created_at: string;
+      updated_at: string;
+    }>;
     
     if (knowledgeItems.length === 0) {
       return [];
@@ -79,7 +88,13 @@ class EnhancedRAGService {
   /**
    * 计算相关度分数
    */
-  private calculateRelevanceScore(query: string, item: any): number {
+  private calculateRelevanceScore(query: string, item: {
+    title: string;
+    content: string;
+    category: string;
+    usage_count: number;
+    created_at: string;
+  }): number {
     let score = 0;
     const queryLower = query.toLowerCase();
     const contentLower = `${item.title} ${item.content} ${item.category}`.toLowerCase();
@@ -130,7 +145,7 @@ class EnhancedRAGService {
   /**
    * 生成高亮片段
    */
-  private generateHighlight(query: string, item: any): string {
+  private generateHighlight(query: string, item: { content: string }): string {
     const content = item.content || '';
     const keywords = this.extractKeywords(query);
     
@@ -166,7 +181,16 @@ class EnhancedRAGService {
   /**
    * 转换知识库项目格式
    */
-  private transformItem(item: any): KnowledgeItem {
+  private transformItem(item: {
+    id: string;
+    title: string;
+    content: string;
+    category: string;
+    tags: string;
+    usage_count: number;
+    created_at: string;
+    updated_at: string;
+  }): KnowledgeItem {
     return {
       id: item.id,
       title: item.title,
@@ -234,7 +258,12 @@ class EnhancedRAGService {
     knowledgeId: string,
     limit: number = 5
   ): Promise<KnowledgeItem[]> {
-    const sourceItem = db.prepare('SELECT * FROM knowledge_base WHERE id = ?').get(knowledgeId) as any;
+    const sourceItem = db.prepare('SELECT * FROM knowledge_base WHERE id = ?').get(knowledgeId) as {
+      id: string;
+      title: string;
+      content: string;
+      category: string;
+    } | undefined;
     
     if (!sourceItem) {
       return [];
@@ -308,24 +337,33 @@ class EnhancedRAGService {
    * 获取知识统计
    */
   getStatistics() {
-    const totalItems = (db.prepare('SELECT COUNT(*) as count FROM knowledge_base').get() as any).count;
+    const totalItems = (db.prepare('SELECT COUNT(*) as count FROM knowledge_base').get() as { count: number }).count;
     const categoryStats = db.prepare(`
       SELECT category, COUNT(*) as count 
       FROM knowledge_base 
       GROUP BY category
       ORDER BY count DESC
-    `).all();
+    `).all() as Array<{ category: string; count: number }>;
     
     const topItems = db.prepare(`
       SELECT * FROM knowledge_base 
       ORDER BY usage_count DESC, created_at DESC 
       LIMIT 10
-    `).all();
+    `).all() as Array<{
+      id: string;
+      title: string;
+      content: string;
+      category: string;
+      tags: string;
+      usage_count: number;
+      created_at: string;
+      updated_at: string;
+    }>;
 
     return {
       totalItems,
       categoryStats,
-      topItems: (topItems as any[]).map(this.transformItem)
+      topItems: topItems.map(item => this.transformItem(item))
     };
   }
 }
