@@ -213,8 +213,9 @@ export default function Settings() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files) {
-      setUploadFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      setUploadFiles((prev) => [...prev, ...Array.from(files)]);
     }
   };
 
@@ -240,7 +241,8 @@ export default function Settings() {
         setTimeout(() => setQanythingTestStatus('idle'), 3000);
         return;
       }
-      if (!qanythingConfig.apiKey.trim()) {
+      // 云端模式要求 API Key，本地模式可不填
+      if (qanythingConfig.mode === 'cloud' && !qanythingConfig.apiKey.trim()) {
         setQanythingSaveStatus('error');
         setQanythingTestMessage('API Key 不能为空');
         setQanythingTestStatus('error');
@@ -841,7 +843,10 @@ export default function Settings() {
                           min="1"
                           max="20"
                           value={qanythingConfig.topK}
-                          onChange={(e) => setQanythingConfig({...qanythingConfig, topK: parseInt(e.target.value) || 5})}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 5;
+                            setQanythingConfig({...qanythingConfig, topK: Math.max(1, Math.min(20, val))});
+                          }}
                           className="w-32 px-4 py-2 bg-surface border border-border rounded-lg text-text-primary focus:outline-none focus:border-primary"
                         />
                         <span className="text-xs text-text-secondary ml-2">默认 5，范围 1-20</span>

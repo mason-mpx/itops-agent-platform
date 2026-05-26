@@ -44,6 +44,13 @@ class QAnythingService {
   }
 
   /**
+   * 获取标准化后的 apiBase（去除末尾斜杠）
+   */
+  private normalizeApiBase(apiBase: string): string {
+    return apiBase.replace(/\/+$/, '');
+  }
+
+  /**
    * 清除缓存配置
    */
   clearConfigCache(): void {
@@ -79,12 +86,13 @@ class QAnythingService {
     }
 
     const k = topK || config.topK || 5;
+    const apiBase = this.normalizeApiBase(config.apiBase);
 
     try {
       logger.info(`🔍 Querying QAnything knowledge base: ${question.substring(0, 100)}`);
 
       const response = await axios.post(
-        `${config.apiBase}/api/local_doc_qa/local_doc_chat`,
+        `${apiBase}/api/local_doc_qa/local_doc_chat`,
         {
           user_id: 'itops_agent',
           kb_ids: [config.kbId],
@@ -158,6 +166,7 @@ class QAnythingService {
     try {
       logger.info(`📤 Uploading document to QAnything: ${fileName}`);
 
+      const apiBase = this.normalizeApiBase(config.apiBase);
       const formData = new FormData();
       formData.append('file', file, {
         filename: fileName,
@@ -167,7 +176,7 @@ class QAnythingService {
       formData.append('user_id', 'itops_agent');
 
       const response = await axios.post(
-        `${config.apiBase}/api/local_doc_qa/upload_files`,
+        `${apiBase}/api/local_doc_qa/upload_files`,
         formData,
         {
           headers: {
@@ -207,8 +216,9 @@ class QAnythingService {
     }
 
     try {
+      const apiBase = this.normalizeApiBase(config.apiBase);
       const response = await axios.get(
-        `${config.apiBase}/api/local_doc_qa/get_file_status`,
+        `${apiBase}/api/local_doc_qa/get_file_status`,
         {
           params: {
             kb_id: config.kbId,
@@ -244,8 +254,9 @@ class QAnythingService {
     }
 
     try {
+      const apiBase = this.normalizeApiBase(config.apiBase);
       await axios.post(
-        `${config.apiBase}/api/local_doc_qa/delete_files`,
+        `${apiBase}/api/local_doc_qa/delete_files`,
         {
           kb_id: config.kbId,
           file_ids: [fileId],
@@ -282,8 +293,9 @@ class QAnythingService {
         headers['Authorization'] = config.apiKey;
       }
 
+      const apiBase = this.normalizeApiBase(config.apiBase);
       const response = await axios.get(
-        `${config.apiBase}/api/health`,
+        `${apiBase}/api/health`,
         {
           headers,
           timeout: 10000
