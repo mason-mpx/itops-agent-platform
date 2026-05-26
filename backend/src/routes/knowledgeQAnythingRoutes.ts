@@ -214,24 +214,23 @@ router.post('/upload-batch', upload.array('files', 10), async (req: Request, res
       return res.status(400).json({ success: false, error: '未上传文件' });
     }
 
-    const results = [];
-    for (const file of files) {
+    const results = await Promise.all(files.map(async (file) => {
       try {
         const result = await qanythingService.uploadDocument(file.buffer, file.originalname);
-        results.push({
+        return {
           fileName: file.originalname,
           fileId: result.fileId,
           status: result.status,
           success: true,
-        });
+        };
       } catch (error: any) {
-        results.push({
+        return {
           fileName: file.originalname,
           success: false,
           error: error.message,
-        });
+        };
       }
-    }
+    }));
 
     res.json({
       success: true,

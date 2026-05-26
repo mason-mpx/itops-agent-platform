@@ -47,6 +47,7 @@ class QAnythingService {
    * 获取标准化后的 apiBase（去除末尾斜杠）
    */
   private normalizeApiBase(apiBase: string): string {
+    if (!apiBase) throw new Error('API base URL is not configured');
     return apiBase.replace(/\/+$/, '');
   }
 
@@ -89,7 +90,7 @@ class QAnythingService {
     const apiBase = this.normalizeApiBase(config.apiBase);
 
     try {
-      logger.info(`🔍 Querying QAnything knowledge base: ${question.substring(0, 100)}`);
+      logger.info(`🔍 Querying QAnything knowledge base: ${question.substring(0, Math.min(question.length, 100))}`);
 
       const response = await axios.post(
         `${apiBase}/api/local_doc_qa/local_doc_chat`,
