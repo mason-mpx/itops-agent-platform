@@ -603,7 +603,19 @@ export async function generateCompletion(
     setTimeout(() => reject(new Error(`LLM generateCompletion 超时 (${timeoutMs / 1000}s)`)), timeoutMs);
   });
 
+  // 优先使用 AI 模型池中的默认模型
+  const defaultModel = aiModelService.getDefaultModel();
+  if (defaultModel && defaultModel.enabled) {
+    logger.info(`🤖 [generateCompletion] Using default model from AI Model Pool: ${defaultModel.name} (${defaultModel.provider})`);
+    return Promise.race([
+      callModelWithConfig(defaultModel, systemPrompt, prompt, 'LLM', temperature, agentId),
+      timeoutPromise
+    ]);
+  }
+
+  // 如果没有配置模型池，回退到旧逻辑
   const provider = model ? getProviderForModel(model) : 'local';
+  logger.info(`🤖 [generateCompletion] No AI Model Pool configured, falling back to legacy mode, provider: ${provider}`);
   
   const executeCompletion = async (): Promise<string> => {
     if (provider === 'local') {
@@ -842,14 +854,24 @@ export async function executeAgentWithLLM(
  * 检查 LLM 服务是否可用
  */
 export async function checkLLMAvailability(): Promise<{ available: boolean; message: string; provider?: 'volcengine' | 'openai' | 'aliyun' | 'deepseek' | 'zhipu' | 'local' }> {
-  // 优先级：火山引擎 > 本地 AI > OpenAI
-  // 1. 检查火山引擎 API（原豆包）
+  // 优先级：火山引擎 > 豆包(兼容旧配置) > 本地 AI > OpenAI
+  // 1. 检查火山引擎 API
   const volcengineApiKey = getApiKey(db, 'VOLCENGINE_API_KEY', 'VOLCENGINE_API_KEY');
   
   if (volcengineApiKey && volcengineApiKey !== 'your-volcengine-api-key-here') {
     const breaker = getCircuitBreaker('VolcEngine');
     if (breaker.canCall()) {
       return { available: true, message: 'VolcEngine API available', provider: 'volcengine' };
+    }
+  }
+
+  // 2. 兼容旧配置：检查豆包 API（向后兼容）
+  const doubaoApiKey = getApiKey(db, 'DOUBAO_API_KEY', 'DOUBAO_API_KEY');
+  
+  if (doubaoApiKey && doubaoApiKey !== 'your-doubao-api-key-here') {
+    const breaker = getCircuitBreaker('Doubao');
+    if (breaker.canCall()) {
+      return { available: true, message: 'Doubao API available', provider: 'volcengine' };
     }
   }
   

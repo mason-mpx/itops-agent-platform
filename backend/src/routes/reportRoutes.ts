@@ -105,12 +105,13 @@ router.post('/generate', (req: Request, res: Response) => {
 
 router.get('/:id/export', async (req: Request, res: Response) => {
   try {
-    const format = (req.query.format as 'pdf' | 'word') || 'pdf';
+    const format = (req.query.format as 'pdf' | 'word' | 'markdown') || 'markdown';
     const exported = await reportService.exportReport(req.params.id, format);
     const report = reportService.getReport(req.params.id);
     
+    const fileExtension = format === 'pdf' ? 'pdf' : format === 'word' ? 'doc' : 'md';
     res.setHeader('Content-Type', exported.type);
-    res.setHeader('Content-Disposition', `attachment; filename="${report?.name || 'report'}.${format === 'pdf' ? 'txt' : format === 'word' ? 'txt' : 'md'}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${report?.name || 'report'}.${fileExtension}"`);
     res.send(exported.content);
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });

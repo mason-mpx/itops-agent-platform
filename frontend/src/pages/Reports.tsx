@@ -110,14 +110,15 @@ export default function Reports() {
     setShowViewReportModal(true);
   };
 
-  const handleDownloadReport = async (reportId: string, format: 'markdown' | 'pdf' | 'word' = 'pdf') => {
+  const handleDownloadReport = async (reportId: string, format: 'markdown' | 'pdf' | 'word' = 'markdown') => {
     try {
       const response = await api.get(`/api/reports/${reportId}/export?format=${format}`, { responseType: 'blob' });
       const blob = response.data;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `report-${reportId}.${format === 'markdown' ? 'md' : 'txt'}`;
+      const fileExtension = format === 'pdf' ? 'pdf' : format === 'word' ? 'doc' : 'md';
+      a.download = `report-${reportId}.${fileExtension}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

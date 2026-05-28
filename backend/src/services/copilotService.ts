@@ -1,6 +1,6 @@
 import db from '../models/database';
 import { logger } from '../utils/logger';
-import { callDoubaoAPI, callOpenAIAPI, callLocalAIAPI, checkLLMAvailability } from './llmService';
+import { callDoubaoAPI, callOpenAIAPI, callLocalAIAPI, checkLLMAvailability, generateCompletion } from './llmService';
 import { randomUUID } from 'crypto';
 
 interface CopilotMessage {
@@ -298,65 +298,36 @@ class CopilotService {
   }
 
   private async generateResponse(input: string, conversationHistory: CopilotMessage[]): Promise<string> {
-    const startTime = Date.now();
-    // 1. 尝试调用 LLM
-    const llmAvailable = await checkLLMAvailability();
-    if (llmAvailable.available) {
-      try {
-        // 构建对话历史（最近 10 条）
-        const recentMessages = conversationHistory.slice(-10);
-        const historyText = recentMessages.map(m => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`).join('\n');
+    try {
+      logger.info(`🤖 [Copilot] 开始生成响应，输入长度: ${input.length}`);
+      
+      // 构建对话历史（最近 10 条）
+      const recentMessages = conversationHistory.slice(-10);
+      const historyText = recentMessages.map(m => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`).join('\n');
 
-        // 注入相关上下文数据
-        const context = this.buildContextForLLM(input);
+      // 注入相关上下文数据
+      const context = this.buildContextForLLM(input);
 
-        const enrichedPrompt = context
-          ? `当前系统数据：\n${context}\n用户输入：${input}\n对话历史：\n${historyText}`
-          : `用户输入：${input}\n对话历史：\n${historyText}`;
+      const enrichedPrompt = context
+        ? `当前系统数据：\n${context}\n用户输入：${input}\n对话历史：\n${historyText}`
+        : `用户输入：${input}\n对话历史：\n${historyText}`;
 
-        // 根据可用的提供商调用对应的 API
-        let llmResponse: string;
-        switch (llmAvailable.provider) {
-          case 'openai':
-            llmResponse = await callOpenAIAPI(
-              COPILOT_SYSTEM_PROMPT,
-              enrichedPrompt,
-              'ITOps Copilot',
-              0.7
-            );
-            break;
-          case 'local':
-            llmResponse = await callLocalAIAPI(
-              COPILOT_SYSTEM_PROMPT,
-              enrichedPrompt,
-              'ITOps Copilot',
-              0.7
-            );
-            break;
-          case 'volcengine':
-          case 'deepseek':
-          case 'aliyun':
-          case 'zhipu':
-          default:
-            llmResponse = await callDoubaoAPI(
-              COPILOT_SYSTEM_PROMPT,
-              enrichedPrompt,
-              'ITOps Copilot',
-              0.7
-            );
-            break;
-        }
-        // 截断超长响应，防止前端渲染问题
-        return llmResponse.length > 4000 ? llmResponse.substring(0, 4000) + '...\n\n（回复过长，已截断）' : llmResponse;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.warn('LLM call failed, falling back to rule-based response:', errorMessage);
-        return this.getRuleBasedResponse(input);
-      }
+      // 优先使用 AI 模型池的默认模型（已在 generateCompletion 中实现）
+      logger.info(`🤖 [Copilot] 调用 generateCompletion 生成响应`);
+      const llmResponse = await generateCompletion(enrichedPrompt, COPILOT_SYSTEM_PROMPT, 0.7, undefined, 'copilot');
+      
+      // 截断超长响应，防止前端渲染问题
+      const truncatedResponse = llmResponse.length > 4000 
+        ? llmResponse.substring(0, 4000) + '...\n\n（回复过长，已截断）' 
+        : llmResponse;
+      
+      logger.info(`🤖 [Copilot] 响应生成成功，长度: ${truncatedResponse.length}`);
+      return truncatedResponse;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`🤖 [Copilot] LLM 调用失败，回退到规则响应: ${errorMessage}`);
+      return this.getRuleBasedResponse(input);
     }
-
-    // 2. LLM 不可用时使用基于规则的响应
-    return this.getRuleBasedResponse(input);
   }
 
   private getRuleBasedResponse(input: string): string {

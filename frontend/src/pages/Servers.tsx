@@ -6,7 +6,7 @@ import {
   AlertCircle, ShieldCheck, Wifi, History, Clock, FolderTree,
   Upload, RefreshCw, ChevronRight, ChevronDown, Cpu,
   HardDrive, MemoryStick, Monitor, FolderPlus, MonitorPlay,
-  Bot, Key, Search,
+  Bot, Key, Search, Settings,
   Sparkles, X, AlertTriangle,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -105,6 +105,7 @@ export default function Servers() {
   const [complianceResults, setComplianceResults] = useState<Record<string, CommandResult> | null>(null);
   const [isRunningCompliance, setIsRunningCompliance] = useState(false);
   const [activeTab, setActiveTab] = useState<'servers' | 'compliance' | 'command-history' | 'compliance-history'>('servers');
+  const [showComplianceOptions, setShowComplianceOptions] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -355,9 +356,14 @@ export default function Servers() {
     },
   });
 
+  const [complianceOptions, setComplianceOptions] = useState({
+    useAI: true,
+    concurrency: 5
+  });
+  
   const runComplianceMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.post(`/api/server-commands/${id}/compliance`);
+    mutationFn: async ({ id, options }: { id: string; options?: { useAI?: boolean; concurrency?: number } }) => {
+      const res = await api.post(`/api/server-commands/${id}/compliance`, options || {});
       return res.data;
     },
     onSuccess: () => {
@@ -526,10 +532,19 @@ export default function Servers() {
 
   const handleRunCompliance = (server: Server) => {
     setSelectedServer(server);
+    setShowComplianceOptions(true);
+  };
+
+  const startComplianceCheck = () => {
+    if (!selectedServer) return;
+    setShowComplianceOptions(false);
     setIsRunningCompliance(true);
     setActiveTab('compliance');
     runComplianceMutation.mutate(
-      server.id,
+      { 
+        id: selectedServer.id,
+        options: complianceOptions
+      },
       {
         onSuccess: (data) => {
           setComplianceResults(data.data);
@@ -1140,6 +1155,69 @@ ${serverInfo.disk_gb ? `磁盘大小：${serverInfo.disk_gb}GB` : ''}
               </div>
             )}
           </div>
+
+          {/* 合规检查选项 */}
+          <div className="mb-6 p-4 bg-background rounded-lg border border-border">
+            <h3 className="text-sm font-medium text-text-primary mb-4">检查选项</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-surface/50 transition-colors border border-transparent hover:border-border">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={complianceOptions.useAI}
+                    onChange={(e) => {
+                      setComplianceOptions(prev => ({
+                        ...prev,
+                        useAI: e.target.checked
+                      }));
+                    }}
+                    disabled={isRunningCompliance}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-6 bg-surface border-2 border-border rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all cursor-pointer">
+                    <div className="w-4 h-4 bg-white rounded-full shadow-md absolute top-1 left-1 peer-checked:translate-x-4 transition-transform"></div>
+                  </div>
+                </div>
+                <div className="flex flex-col flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-text-primary">AI 智能分析</span>
+                    {complianceOptions.useAI && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded-full font-medium">推荐</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-text-tertiary mt-0.5">
+                    {complianceOptions.useAI 
+                      ? '🤖 对检查结果进行智能分析，给出专业建议' 
+                      : '⚡ 仅执行命令，检查速度提升 60%'
+                    }
+                  </span>
+                </div>
+              </label>
+              <div className="flex items-center gap-3 p-2 rounded-lg">
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-text-primary">并发执行数</span>
+                  <span className="text-xs text-text-secondary mt-0.5">同时执行的检查命令数量</span>
+                </div>
+                <select
+                  value={complianceOptions.concurrency}
+                  onChange={(e) => {
+                    setComplianceOptions(prev => ({
+                      ...prev,
+                      concurrency: parseInt(e.target.value)
+                    }));
+                  }}
+                  disabled={isRunningCompliance}
+                  className="ml-auto w-28 bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-medium"
+                >
+                  <option value={3}>3 (较慢)</option>
+                  <option value={5}>5 (推荐)</option>
+                  <option value={8}>8 (较快)</option>
+                  <option value={10}>10 (最快)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           {complianceResults ? (
             <div className="space-y-4">
               {Object.entries(complianceResults).map(([checkName, result]) => (
@@ -1198,6 +1276,19 @@ ${serverInfo.disk_gb ? `磁盘大小：${serverInfo.disk_gb}GB` : ''}
             <div className="text-center py-12 text-text-secondary">
               <ShieldCheck className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>点击&quot;合规检查&quot;按钮开始执行检查</p>
+            </div>
+          )}
+
+          {/* 重新检查按钮 */}
+          {complianceResults && (
+            <div className="mt-6 pt-6 border-t border-border flex justify-center">
+              <button
+                onClick={() => handleRunCompliance(selectedServer)}
+                className="flex items-center gap-2 px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+                重新执行检查（设置选项）
+              </button>
             </div>
           )}
         </div>
@@ -2324,6 +2415,130 @@ ${serverInfo.disk_gb ? `磁盘大小：${serverInfo.disk_gb}GB` : ''}
                   className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                 >
                   确认删除
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 合规检查选项弹窗 */}
+        {showComplianceOptions && selectedServer && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]" onClick={() => setShowComplianceOptions(false)}>
+            <div className="bg-surface rounded-xl p-6 w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                    <ShieldCheck className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-text-primary">合规检查</h3>
+                    <p className="text-sm text-text-secondary mt-1">{selectedServer.name} ({selectedServer.hostname})</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowComplianceOptions(false)}
+                  className="p-2 hover:bg-background rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5 text-text-secondary" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* AI 智能分析开关 */}
+                <div className="p-4 bg-background rounded-lg border border-border">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-text-primary">AI 智能分析</span>
+                        {complianceOptions.useAI && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded-full font-medium">推荐</span>
+                        )}
+                      </div>
+                      <span className="text-xs text-text-tertiary mt-1">
+                        {complianceOptions.useAI 
+                          ? '🤖 对检查结果进行智能分析，给出专业建议' 
+                          : '⚡ 仅执行命令，检查速度提升 60%'
+                        }
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={complianceOptions.useAI}
+                        onChange={(e) => setComplianceOptions(prev => ({ ...prev, useAI: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-surface border-2 border-border rounded-full peer peer-checked:bg-primary peer-checked:border-primary transition-all">
+                        <div className="w-4 h-4 bg-white rounded-full shadow-md absolute top-0.5 left-0.5 peer-checked:translate-x-5 transition-transform"></div>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* 并发数选择 */}
+                <div className="p-4 bg-background rounded-lg border border-border">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">并发执行数</span>
+                      <p className="text-xs text-text-tertiary mt-1">同时执行的检查命令数量</p>
+                    </div>
+                    <span className="text-lg font-bold text-primary">{complianceOptions.concurrency}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {[3, 5, 8, 10].map(num => (
+                      <button
+                        key={num}
+                        onClick={() => setComplianceOptions(prev => ({ ...prev, concurrency: num }))}
+                        className={clsx(
+                          'flex-1 py-2 rounded-lg text-sm font-medium transition-all',
+                          complianceOptions.concurrency === num
+                            ? 'bg-primary text-white'
+                            : 'bg-surface text-text-secondary hover:text-text-primary border border-border'
+                        )}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex justify-between mt-2 text-xs text-text-tertiary">
+                    <span>较慢（稳定）</span>
+                    <span>推荐</span>
+                    <span>较快（对服务器压力大）</span>
+                  </div>
+                </div>
+
+                {/* 预计时间提示 */}
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                  <p className="text-sm text-blue-300">
+                    ⏱️ 预计执行时间：约 <strong>{complianceOptions.useAI ? 15 + (10 - complianceOptions.concurrency) * 2 : 3 + (10 - complianceOptions.concurrency)}</strong> 秒
+                  </p>
+                </div>
+              </div>
+
+              {/* 操作按钮 */}
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowComplianceOptions(false)}
+                  className="flex-1 px-4 py-2 bg-surface border border-border text-text-primary rounded-lg hover:bg-background transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={startComplianceCheck}
+                  disabled={isRunningCompliance}
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isRunningCompliance ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      检查中...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      开始检查
+                    </>
+                  )}
                 </button>
               </div>
             </div>

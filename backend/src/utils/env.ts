@@ -57,13 +57,21 @@ function validateEnv(): EnvConfig {
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  // 生产环境下JWT_SECRET是强制要求的
   const isProduction = process.env.NODE_ENV === 'production';
-  
-  if (isProduction && !process.env.JWT_SECRET) {
+  const jwtSecret = process.env.JWT_SECRET;
+
+  if (isProduction && !jwtSecret) {
     errors.push('Missing required environment variable: JWT_SECRET (must be set in production)');
-  } else if (!process.env.JWT_SECRET) {
+  } else if (!jwtSecret) {
     warnings.push('Missing recommended environment variable: JWT_SECRET (using insecure default, DO NOT use in production)');
+  }
+
+  if (jwtSecret && jwtSecret === 'itops-agent-platform-secret-key-change-in-production') {
+    if (isProduction) {
+      throw new Error('Cannot use default JWT_SECRET in production! Please set a secure secret.');
+    } else {
+      console.warn('⚠️ WARNING: Using default JWT secret. This is INSECURE and should ONLY be used for development!');
+    }
   }
 
   if (warnings.length > 0) {
@@ -79,47 +87,14 @@ function validateEnv(): EnvConfig {
     }
   }
 
-  const jwtSecret = process.env.JWT_SECRET;
-  // 检查是否还在使用默认的不安全密钥
-  if (jwtSecret && jwtSecret === 'itops-agent-platform-secret-key-change-in-production') {
-    if (isProduction) {
-      throw new Error('Cannot use default JWT_SECRET in production! Please set a secure secret.');
-    } else {
-      console.warn('⚠️ WARNING: Using default JWT secret. This is INSECURE and should ONLY be used for development!');
-    }
-  }
-
+  let finalJwtSecret: string;
   if (!jwtSecret) {
-    const generatedDevSecret = crypto.randomBytes(32).toString('hex');
+    finalJwtSecret = crypto.randomBytes(32).toString('hex');
     console.warn('⚠️ WARNING: Using a randomly generated JWT secret for this session.');
     console.warn('   This means all tokens will be invalidated on server restart.');
     console.warn('   Set JWT_SECRET in your .env file for persistent sessions.');
-    return {
-      NODE_ENV: getEnv('NODE_ENV', 'development'),
-      PORT: getEnvAsNumber('PORT', 3001),
-      DATABASE_PATH: getEnv('DATABASE_PATH', './data/app.db'),
-      LOG_LEVEL: getEnv('LOG_LEVEL', 'info'),
-      JWT_SECRET: generatedDevSecret,
-      JWT_EXPIRES_IN: getEnv('JWT_EXPIRES_IN', '24h'),
-      ALLOWED_ORIGINS: getEnv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',').map(s => s.trim()),
-      DOUBAO_API_KEY: process.env.DOUBAO_API_KEY,
-      DOUBAO_API_BASE: process.env.DOUBAO_API_BASE,
-      DOUBAO_MODEL: process.env.DOUBAO_MODEL,
-      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-      OPENAI_API_BASE: process.env.OPENAI_API_BASE,
-      OPENAI_MODEL: process.env.OPENAI_MODEL,
-      LOCAL_AI_API_KEY: process.env.LOCAL_AI_API_KEY,
-      LOCAL_AI_API_BASE: process.env.LOCAL_AI_API_BASE,
-      LOCAL_AI_MODEL: process.env.LOCAL_AI_MODEL,
-      WEBHOOK_VERIFY_ENABLED: process.env.WEBHOOK_VERIFY_ENABLED === 'true',
-      WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
-      ALERT_WEBHOOK_URL: process.env.ALERT_WEBHOOK_URL,
-      ALERT_EMAIL_HOST: process.env.ALERT_EMAIL_HOST,
-      ALERT_EMAIL_PORT: getEnvAsNumber('ALERT_EMAIL_PORT', 587),
-      ALERT_EMAIL_USER: process.env.ALERT_EMAIL_USER,
-      ALERT_EMAIL_PASS: process.env.ALERT_EMAIL_PASS,
-      ALERT_EMAIL_TO: process.env.ALERT_EMAIL_TO
-    };
+  } else {
+    finalJwtSecret = jwtSecret;
   }
 
   return {
@@ -127,7 +102,7 @@ function validateEnv(): EnvConfig {
     PORT: getEnvAsNumber('PORT', 3001),
     DATABASE_PATH: getEnv('DATABASE_PATH', './data/app.db'),
     LOG_LEVEL: getEnv('LOG_LEVEL', 'info'),
-    JWT_SECRET: jwtSecret,
+    JWT_SECRET: finalJwtSecret,
     JWT_EXPIRES_IN: getEnv('JWT_EXPIRES_IN', '24h'),
     ALLOWED_ORIGINS: getEnv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',').map(s => s.trim()),
     DOUBAO_API_KEY: process.env.DOUBAO_API_KEY,

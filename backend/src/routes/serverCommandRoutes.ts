@@ -92,10 +92,18 @@ router.get('/compliance/checks', (_req: Request, res: Response) => {
 router.post('/:id/compliance', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
   try {
     const saveResults = req.body.saveResults !== false;
-    const results = await runComplianceCheck(req.params.id, { saveResults });
+    const useAI = req.body.useAI !== false;
+    const concurrency = req.body.concurrency || 5;
+    
+    const results = await runComplianceCheck(req.params.id, { 
+      saveResults, 
+      useAI, 
+      concurrency 
+    });
 
     res.json({ success: true, data: results });
-  } catch {
+  } catch (error) {
+    console.error('Compliance check error:', error);
     res.status(500).json({ success: false, error: 'Failed to run compliance check' });
   }
 });

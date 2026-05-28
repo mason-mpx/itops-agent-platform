@@ -18,7 +18,7 @@ ITOps Agent Platform 是一个基于 AI 的智能运维平台，支持：
 适用于：Linux 服务器，已安装 Docker
 
 ```bash
-curl -fsSL https://your-repo/deploy.sh | bash
+curl -fsSL https://github.com/qinshihu/itops-agent-platform/deploy.sh | bash
 ```
 
 脚本会自动完成：环境检查 → 生成配置 → 拉取镜像 → 启动服务 → 健康检查

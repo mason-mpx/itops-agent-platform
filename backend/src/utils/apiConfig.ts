@@ -12,7 +12,14 @@ export function getApiKey(database: Database.Database, keyName: string, envName:
     const result = database.prepare('SELECT value FROM settings WHERE key = ?').get(keyName);
     if (result && (result as SettingsRecord).value) {
       const value = (result as SettingsRecord).value;
-      if (value && value !== 'your-doubao-api-key-here' && value !== 'your-openai-api-key-here') {
+      if (value && 
+          value !== 'your-doubao-api-key-here' && 
+          value !== 'your-openai-api-key-here' &&
+          value !== 'your-volcengine-api-key-here' &&
+          value !== 'your-local-ai-api-key-here' &&
+          value !== 'your-deepseek-api-key-here' &&
+          value !== 'your-aliyun-api-key-here' &&
+          value !== 'your-zhipu-api-key-here') {
         return value;
       }
     }
@@ -20,7 +27,14 @@ export function getApiKey(database: Database.Database, keyName: string, envName:
     // 忽略数据库错误，回退到环境变量
   }
   const envValue = process.env[envName];
-  if (envValue && envValue !== 'your-doubao-api-key-here' && envValue !== 'your-openai-api-key-here') {
+  if (envValue && 
+      envValue !== 'your-doubao-api-key-here' && 
+      envValue !== 'your-openai-api-key-here' &&
+      envValue !== 'your-volcengine-api-key-here' &&
+      envValue !== 'your-local-ai-api-key-here' &&
+      envValue !== 'your-deepseek-api-key-here' &&
+      envValue !== 'your-aliyun-api-key-here' &&
+      envValue !== 'your-zhipu-api-key-here') {
     return envValue;
   }
   return undefined;

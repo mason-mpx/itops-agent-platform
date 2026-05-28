@@ -432,7 +432,7 @@ class ReportService {
     return result.changes > 0;
   }
 
-  async exportReport(reportId: string, format: 'pdf' | 'word' = 'pdf'): Promise<{ content: string, type: string }> {
+  async exportReport(reportId: string, format: 'pdf' | 'word' | 'markdown' = 'markdown'): Promise<{ content: string, type: string }> {
     const report = this.getReport(reportId);
     if (!report) {
       throw new Error('报告不存在');

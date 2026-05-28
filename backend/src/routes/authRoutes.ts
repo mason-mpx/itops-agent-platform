@@ -229,10 +229,11 @@ router.post('/logout', authenticateToken, async (req: Request, res: Response) =>
       success: true,
       message: '退出成功'
     });
-  } catch {
-    res.json({
-      success: true,
-      message: '退出成功'
+  } catch (error) {
+    logger.error('登出失败', error);
+    res.status(500).json({
+      success: false,
+      message: '登出过程出现错误'
     });
   }
 });

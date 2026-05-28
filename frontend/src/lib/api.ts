@@ -1,14 +1,22 @@
 import axios from 'axios';
 
-let isRefreshing = false;
-let failedQueue: Array<{ resolve: (value?: unknown) => void; reject: (reason?: unknown) => void }> = [];
+interface TokenRefreshResult {
+  token: string;
+  refreshToken: string;
+}
 
-const processQueue = (error: Error | null, token: string | null = null) => {
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value: TokenRefreshResult | PromiseLike<TokenRefreshResult>) => void;
+  reject: (reason?: unknown) => void;
+}> = [];
+
+const processQueue = (error: Error | null, result: TokenRefreshResult | null = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.reject(error);
-    } else {
-      prom.resolve(token);
+    } else if (result) {
+      prom.resolve(result);
     }
   });
   failedQueue = [];
@@ -60,11 +68,11 @@ api.interceptors.response.use(
       }
 
       if (isRefreshing) {
-        return new Promise((resolve, reject) => {
+        return new Promise<TokenRefreshResult>((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
+          .then((result) => {
+            originalRequest.headers.Authorization = `Bearer ${result.token}`;
             return api(originalRequest);
           })
           .catch((err) => {
@@ -92,7 +100,7 @@ api.interceptors.response.use(
           localStorage.setItem('token', newToken);
           localStorage.setItem('refreshToken', newRefreshToken);
 
-          processQueue(null, newToken);
+          processQueue(null, { token: newToken, refreshToken: newRefreshToken });
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
           return api(originalRequest);
         } else {

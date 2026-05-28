@@ -1,4 +1,4 @@
-**⚠️重要许可证变更通知（2026-05-27）** 
+**重要许可证⚠️变更通知（2026-05-27）** 
 
 本项目自今日起，所有新提交的代码将采用 **Mozilla Public License 2.0 (MPL-2.0)** 许可证开源。
 - 2026年5月27日 16:00 之前提交的所有代码，仍遵循原 MIT 许可证
@@ -44,6 +44,7 @@ graph TB
     Express --> Webhook["🚨 告警 Webhook<br/>Prometheus | Zabbix"]
     Express --> Notify["📬 通知渠道<br/>邮件 | 企业微信 | 钉钉"]
 ```
+
 
 > 📐 [查看完整架构图 →](./docs/ARCHITECTURE_DIAGRAM.md)
 
