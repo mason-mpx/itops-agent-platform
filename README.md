@@ -485,9 +485,9 @@ npm run dev
 
 | 头像 | 姓名 / 用户名 | 角色 | 主要贡献 |
 |:---:|:---:|:---:|:---|
-| <img src="./docs-assets/contributors/placeholder-1.svg" width="60" height="60" style="border-radius:50%;" /> | **谭策** ([@qinshihu](https://github.com/qinshihu)) | 项目作者 | 项目架构设计、核心功能开发、文档编写 |
-| <img src="./docs-assets/contributors/微信图片_2026-06-12_143259_183.jpg" width="60" height="60" style="border-radius:50%;" /> | **热心市民高先生** | 微信贡献者 | 项目测试与反馈 |
-| <img src="./docs-assets/contributors/微信图片_2026-06-12_143226_852.jpg" width="60" height="60" style="border-radius:50%;" /> | **@林** | 微信贡献者 | 项目测试与反馈 |
+| <img src="./docs-assets/contributors/1.jpg" width="60" height="60" style="border-radius:50%;" /> | **谭策** ([@qinshihu](https://github.com/qinshihu)) | 项目作者 | 项目架构设计、核心功能开发、文档编写 |
+| <img src="./docs-assets/contributors/微信图片_2026-06-12_143259_183.jpg" width="60" height="60" style="border-radius:50%;" /> | **热心市民高先生** | 微信贡献者 | 项目测试开发反馈 |
+| <img src="./docs-assets/contributors/微信图片_2026-06-12_143226_852.jpg" width="60" height="60" style="border-radius:50%;" /> | **@林** | 微信贡献者 | 项目测试开发反馈 |
 | <img src="./docs-assets/contributors/placeholder-4.svg" width="60" height="60" style="border-radius:50%;" /> | **待添加** | 贡献者 | 在此描述主要贡献 |
 
 > 💡 **如何添加贡献者**：
