@@ -647,6 +647,7 @@ cat SKILL.md | xclip -selection clipboard  # Linux
 | <img src="./docs-assets/contributors/微信图片_2026-06-12_143259_183.jpg" width="60" height="60" style="border-radius:50%;" /> | **热心市民高先生** | 微信贡献者 | 项目测试开发反馈 |
 | <img src="./docs-assets/contributors/微信图片_2026-06-12_143226_852.jpg" width="60" height="60" style="border-radius:50%;" /> | **@林** | 微信贡献者 | 项目测试开发反馈 |
 | <img src="./docs-assets/contributors/11.jpg" width="60" height="60" style="border-radius:50%;" /> | **尔东辰** | 微信贡献者 | 项目测试 |
+| <img src="https://avatars.githubusercontent.com/u/68582645?v=4" width="60" height="60" style="border-radius:50%;" /> | **xiezhiliang89** | Github贡献者 | 项目测试 |
 
 > 💡 **如何添加贡献者**：
 > 1. 将头像图片放入 [`./docs-assets/contributors/`](./docs-assets/contributors/) 文件夹
