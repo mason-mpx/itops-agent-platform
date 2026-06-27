@@ -1,220 +1,439 @@
 import { Router, Request, Response } from 'express';
 import { dockerService } from '../services/dockerService';
+import { multiHostDockerService } from '../services/multiHostDockerService';
 import { requireRole } from '../middleware/auth';
 import Docker from 'dockerode';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
-// 用于 createContainer/run 操作的 Docker 实例
-const docker = new Docker({ socketPath: process.env.DOCKER_SOCKET || '/var/run/docker.sock' });
+// ── Docker 客户端获取（支持多主机） ──
+function getDocker(req: Request): Docker {
+  const endpointId = req.query.endpointId as string | undefined;
+  if (endpointId) {
+    try {
+      return multiHostDockerService.getDockerClient(endpointId);
+    } catch {
+      throw Object.assign(new Error('指定的 Docker 端点不可用'), { statusCode: 503 });
+    }
+  }
+  // 默认使用本地 socket
+  return new Docker({ socketPath: process.env.DOCKER_SOCKET || '/var/run/docker.sock' });
+}
 
-// 检查 Docker 可用性的辅助函数
-function checkDockerAvailable(res: Response): boolean {
+function checkDockerAvailable(res: Response, req?: Request): boolean {
+  if (req) {
+    const endpointId = req.query.endpointId as string | undefined;
+    if (endpointId) {
+      if (!multiHostDockerService.getEndpoint(endpointId)) {
+        res.status(404).json({ success: false, message: 'Docker 端点不存在' });
+        return false;
+      }
+      return true;
+    }
+  }
   if (!dockerService.isAvailable()) {
-    res.status(503).json({ success: false, message: 'Docker 服务不可用' });
+    res.status(503).json({ success: false, message: 'Docker 服务不可用，请先配置 Docker 连接' });
     return false;
   }
   return true;
 }
 
-// GET / — 获取容器列表
-router.get('/', async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
+// ═══════════════════════════════════════════════════
+// 端点管理（多主机 Docker 连接配置）
+// ═══════════════════════════════════════════════════
 
+// GET /endpoints — 列出所有 Docker 端点
+router.get('/endpoints', requireRole('admin', 'operator'), (_req: Request, res: Response) => {
+  try {
+    const endpoints = multiHostDockerService.listEndpoints();
+    // 始终包含本地
+    const localAvailable = dockerService.isAvailable();
+    const all = [
+      { id: 'local', name: '本地 Docker', host: 'localhost', port: 0, protocol: 'socket', status: localAvailable ? 'active' as const : 'inactive' as const },
+      ...endpoints,
+    ];
+    res.json({ success: true, data: all });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /endpoints — 添加远程 Docker 端点
+router.post('/endpoints', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  try {
+    const { name, host, port, protocol, tlsCa, tlsCert, tlsKey } = req.body;
+    if (!name || !host) {
+      return res.status(400).json({ success: false, message: '名称和主机为必填项' });
+    }
+    const endpoint = await multiHostDockerService.addEndpoint({
+      name, host, port: port || 2375, protocol: protocol || 'tcp',
+      tlsCa: tlsCa || undefined, tlsCert: tlsCert || undefined, tlsKey: tlsKey || undefined,
+      status: 'inactive',
+    });
+    // 异步测试连接
+    multiHostDockerService.testConnection({
+      host, port: port || 2375, protocol: protocol || 'tcp',
+      tls_ca: tlsCa, tls_cert: tlsCert, tls_key: tlsKey,
+    }).then(result => {
+      const status = result.success ? 'active' : 'error';
+      const db = require('../models/database').db;
+      db.prepare('UPDATE docker_endpoints SET status=?, error_message=? WHERE id=?')
+        .run(status, result.message || null, endpoint.id);
+    }).catch(() => {});
+    res.json({ success: true, data: endpoint });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /endpoints/:id — 更新端点
+router.put('/endpoints/:id', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  try {
+    const endpoint = await multiHostDockerService.updateEndpoint(req.params.id, req.body);
+    res.json({ success: true, data: endpoint });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /endpoints/:id — 删除端点
+router.delete('/endpoints/:id', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  try {
+    await multiHostDockerService.deleteEndpoint(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /endpoints/:id/test — 测试连接
+router.post('/endpoints/test', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  try {
+    const result = await multiHostDockerService.testConnection(req.body);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /endpoints/:id/refresh — 刷新端点信息
+router.post('/endpoints/:id/refresh', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  try {
+    await multiHostDockerService.refreshEndpointInfo(req.params.id);
+    const endpoint = multiHostDockerService.getEndpoint(req.params.id);
+    res.json({ success: true, data: endpoint });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// 容器管理
+// ═══════════════════════════════════════════════════
+
+// GET / — 容器列表
+router.get('/', async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
   try {
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = parseInt(req.query.pageSize as string) || 20;
     const search = (req.query.search as string || '').toLowerCase();
     const status = (req.query.status as string || '').toLowerCase();
+    const endpointId = req.query.endpointId as string | undefined;
 
-    const allContainers = await dockerService.listContainers(true);
+    let allContainers: any[];
+    if (endpointId && endpointId !== 'local') {
+      const d = getDocker(req);
+      allContainers = await d.listContainers({ all: true });
+    } else {
+      allContainers = await dockerService.listContainers(true);
+    }
 
-    // 内存分页与过滤
     let filtered = allContainers;
     if (search) {
-      filtered = filtered.filter(c =>
-        c.name.toLowerCase().includes(search) ||
-        c.image.toLowerCase().includes(search)
+      filtered = filtered.filter((c: any) =>
+        (c.name || c.Names?.[0] || '').toLowerCase().includes(search) ||
+        (c.image || c.Image || '').toLowerCase().includes(search)
       );
     }
     if (status) {
-      filtered = filtered.filter(c => c.state.toLowerCase() === status);
+      filtered = filtered.filter((c: any) => (c.state || c.State || '').toLowerCase() === status);
     }
-
     const total = filtered.length;
-    const offset = (page - 1) * pageSize;
-    const data = filtered.slice(offset, offset + pageSize);
-
+    const data = filtered.slice((page - 1) * pageSize, page * pageSize);
     res.json({ success: true, data, total });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// GET /hosts — 主机列表（单 Docker 守护进程）
-router.get('/hosts', (_req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
-  res.json({ success: true, data: [{ host: 'local', name: 'Docker Host' }] });
+// GET /hosts — 返回所有可用端点
+router.get('/hosts', (req: Request, res: Response) => {
+  try {
+    const endpoints = multiHostDockerService.listEndpoints();
+    const localAvailable = dockerService.isAvailable();
+    const all = [
+      { id: 'local', name: '本地 Docker', host: 'localhost', status: localAvailable ? 'active' : 'inactive' },
+      ...endpoints.map(e => ({ id: e.id, name: e.name, host: e.host, status: e.status })),
+    ];
+    res.json({ success: true, data: all });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
-// GET /logs/:id — 容器日志（必须放在 /:id 之前）
+// GET /logs/:id — 容器日志
 router.get('/logs/:id', async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
     const tail = parseInt(req.query.tail as string) || 100;
     const timestamps = req.query.timestamps !== 'false';
-
-    const logs = await dockerService.getContainerLogs(req.params.id, tail, timestamps);
+    const d = getDocker(req);
+    const container = d.getContainer(req.params.id);
+    const stream = await container.logs({ stdout: true, stderr: true, tail, timestamps });
+    const logs = typeof stream === 'string' ? stream : stream.toString('utf-8');
     res.json({ success: true, data: logs });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 });
 
-// GET /stats/:id — 容器实时统计（必须放在 /:id 之前）
+// GET /stats/:id — 容器实时统计
 router.get('/stats/:id', async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
-    const stats = await dockerService.getContainerStats(req.params.id);
+    const d = getDocker(req);
+    const container = d.getContainer(req.params.id);
+    const stats = await container.stats({ stream: false });
     res.json({ success: true, data: stats });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 });
 
-// POST /run — 创建并运行容器（必须放在 /:id 之前）
+// POST /run — 创建并运行容器
 router.post('/run', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
+    const d = getDocker(req);
     const { image, name, ports, env, volumes, restartPolicy, memory, cpuShares } = req.body;
-    if (!image) {
-      return res.status(400).json({ success: false, message: '缺少镜像名称' });
-    }
+    if (!image) return res.status(400).json({ success: false, message: '缺少镜像名称' });
 
-    // 构建端口映射
-    const exposedPorts: Record<string, any> = {};
-    const portBindings: Record<string, any> = {};
+    const config: any = { Image: image, name: name || undefined };
+    const hostConfig: any = {};
 
     if (ports && Array.isArray(ports)) {
-      for (const mapping of ports) {
-        const [hostPort, containerPort] = String(mapping).split(':');
-        if (containerPort) {
-          const containerPortKey = `${containerPort}/tcp`;
-          exposedPorts[containerPortKey] = {};
-          portBindings[containerPortKey] = [{ HostPort: hostPort }];
-        }
+      const ep: any = {}; const pb: any = {};
+      for (const m of ports) {
+        const [hp, cp] = String(m).split(':');
+        if (cp) { ep[`${cp}/tcp`] = {}; pb[`${cp}/tcp`] = [{ HostPort: hp }]; }
       }
+      if (Object.keys(ep).length) { config.ExposedPorts = ep; hostConfig.PortBindings = pb; }
     }
+    if (volumes && Array.isArray(volumes)) hostConfig.Binds = volumes.map(String);
+    if (env && Array.isArray(env)) config.Env = env.map(String);
+    if (restartPolicy) hostConfig.RestartPolicy = { Name: restartPolicy };
+    if (memory) hostConfig.Memory = memory;
+    if (cpuShares) hostConfig.CpuShares = cpuShares;
+    if (Object.keys(hostConfig).length) config.HostConfig = hostConfig;
 
-    // 构建卷绑定
-    const binds: string[] = [];
-    if (volumes && Array.isArray(volumes)) {
-      for (const v of volumes) {
-        binds.push(String(v));
-      }
-    }
-
-    // 构建环境变量
-    const envList: string[] = [];
-    if (env && Array.isArray(env)) {
-      for (const e of env) {
-        envList.push(String(e));
-      }
-    }
-
-    const containerConfig: Docker.ContainerCreateOptions = {
-      Image: image,
-      name: name || undefined,
-      ExposedPorts: Object.keys(exposedPorts).length > 0 ? exposedPorts : undefined,
-      Env: envList.length > 0 ? envList : undefined,
-      HostConfig: {
-        PortBindings: Object.keys(portBindings).length > 0 ? portBindings : undefined,
-        Binds: binds.length > 0 ? binds : undefined,
-        RestartPolicy: restartPolicy ? { Name: restartPolicy } : undefined,
-        Memory: memory || undefined,
-        CpuShares: cpuShares || undefined,
-      },
-    };
-
-    const container = await docker.createContainer(containerConfig);
+    const container = await d.createContainer(config);
     await container.start();
-
     res.json({ success: true, data: { id: container.id, name: name || container.id } });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
+  } catch (err: any) {
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 });
 
 // GET /:id — 容器详情
 router.get('/:id', async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
-    const container = await dockerService.getContainer(req.params.id);
-    res.json({ success: true, data: container });
-  } catch (error: any) {
-    const status = error.statusCode || 404;
-    res.status(status).json({ success: false, message: error.message });
+    const d = getDocker(req);
+    const container = d.getContainer(req.params.id);
+    const data = await container.inspect();
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(err.statusCode || 404).json({ success: false, message: err.message });
   }
 });
 
 // POST /:id/start
 router.post('/:id/start', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
-    await dockerService.startContainer(req.params.id);
+    const d = getDocker(req);
+    await d.getContainer(req.params.id).start();
     res.json({ success: true, message: '容器已启动' });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
-  }
+  } catch (err: any) { res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // POST /:id/stop
 router.post('/:id/stop', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
-    await dockerService.stopContainer(req.params.id);
+    const d = getDocker(req);
+    await d.getContainer(req.params.id).stop();
     res.json({ success: true, message: '容器已停止' });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
-  }
+  } catch (err: any) { res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // POST /:id/restart
 router.post('/:id/restart', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
-    await dockerService.restartContainer(req.params.id);
+    const d = getDocker(req);
+    await d.getContainer(req.params.id).restart();
     res.json({ success: true, message: '容器已重启' });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
-  }
+  } catch (err: any) { res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // DELETE /:id
 router.delete('/:id', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
-  if (!checkDockerAvailable(res)) return;
-
+  if (!checkDockerAvailable(res, req)) return;
   try {
-    await dockerService.removeContainer(req.params.id);
+    const d = getDocker(req);
+    await d.getContainer(req.params.id).remove({ force: true });
     res.json({ success: true });
-  } catch (error: any) {
-    const status = error.statusCode || 500;
-    res.status(status).json({ success: false, message: error.message });
-  }
+  } catch (err: any) { res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════
+// 镜像管理
+// ═══════════════════════════════════════════════════
+
+router.get('/images/list', async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const images = await d.listImages();
+    res.json({ success: true, data: images });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/images/pull', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ success: false, message: '缺少镜像名称' });
+    const d = getDocker(req);
+    const stream = await d.pull(image);
+    await new Promise<void>((resolve, reject) => {
+      d.modem.followProgress(stream, (err: any) => err ? reject(err) : resolve(), () => {});
+    });
+    res.json({ success: true, message: `镜像 ${image} 拉取成功` });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/images/:id', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const image = d.getImage(req.params.id);
+    await image.remove({ force: true });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════
+// 数据卷管理
+// ═══════════════════════════════════════════════════
+
+router.get('/volumes/list', async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const result = await d.listVolumes();
+    res.json({ success: true, data: result.Volumes || [] });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/volumes', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const { name, driver, labels } = req.body;
+    const d = getDocker(req);
+    const vol = await d.createVolume({ Name: name, Driver: driver || 'local', Labels: labels || {} });
+    res.json({ success: true, data: vol });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/volumes/:id', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const vol = d.getVolume(req.params.id);
+    await vol.remove({ force: true });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════
+// Docker 网络管理
+// ═══════════════════════════════════════════════════
+
+router.get('/networks/list', async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const networks = await d.listNetworks();
+    res.json({ success: true, data: networks });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.get('/networks/:id', async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const net = d.getNetwork(req.params.id);
+    const data = await net.inspect();
+    res.json({ success: true, data });
+  } catch (err: any) { res.status(err.statusCode || 404).json({ success: false, message: err.message }); }
+});
+
+router.post('/networks', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const { name, driver, subnet, gateway, internal, attachable } = req.body;
+    const d = getDocker(req);
+    const opts: any = { Name: name, Driver: driver || 'bridge', Internal: !!internal, Attachable: !!attachable };
+    if (subnet) {
+      opts.IPAM = { Config: [{ Subnet: subnet, Gateway: gateway || undefined }] };
+    }
+    const net = await d.createNetwork(opts);
+    res.json({ success: true, data: net });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.delete('/networks/:id', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const net = d.getNetwork(req.params.id);
+    await net.remove();
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/networks/:id/connect', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const net = d.getNetwork(req.params.id);
+    await net.connect({ Container: req.body.containerId });
+    res.json({ success: true, message: '容器已连接到网络' });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
+});
+
+router.post('/networks/:id/disconnect', requireRole('admin', 'operator'), async (req: Request, res: Response) => {
+  if (!checkDockerAvailable(res, req)) return;
+  try {
+    const d = getDocker(req);
+    const net = d.getNetwork(req.params.id);
+    await net.disconnect({ Container: req.body.containerId });
+    res.json({ success: true, message: '容器已断开网络' });
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
 });
 
 export default router;

@@ -229,28 +229,28 @@ export default function RemoteDesktop() {
 
         {/* 错误提示 */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
             <div className="flex gap-3">
-              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
               <div>
-                <h3 className="text-sm font-medium text-red-800">连接错误</h3>
-                <p className="text-sm text-red-700 mt-1">{error}</p>
+                <h3 className="text-sm font-medium text-red-400">连接错误</h3>
+                <p className="text-sm text-red-300 mt-1">{error}</p>
               </div>
             </div>
           </div>
         )}
 
         {/* 提示信息 */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
           <div className="flex gap-3">
-            <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-medium text-blue-800">提示</h3>
-              <p className="text-sm text-blue-700 mt-1">
+              <h3 className="text-sm font-medium text-blue-400">提示</h3>
+              <p className="text-sm text-blue-300 mt-1">
                 Windows 服务器需要先安装并启动 VNC 服务器（推荐 TightVNC 或 RealVNC）。
               </p>
-              <p className="text-sm text-blue-700 mt-2">
-                如需完整的 noVNC 集成，请运行 <code className="bg-blue-100 px-2 py-0.5 rounded">npm install @novnc/novnc</code>
+              <p className="text-sm text-blue-300 mt-2">
+                如需完整的 noVNC 集成，请运行 <code className="bg-blue-500/20 px-2 py-0.5 rounded text-blue-300">npm install @novnc/novnc</code>
               </p>
             </div>
           </div>

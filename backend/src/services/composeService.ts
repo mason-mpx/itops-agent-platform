@@ -37,6 +37,10 @@ class ComposeService {
     if (!fs.existsSync(this.composeDataDir)) {
       fs.mkdirSync(this.composeDataDir, { recursive: true });
     }
+    // Tables initialized via ensureTables() called from app.ts after DB ready
+  }
+
+  ensureTables() {
     this.initTables();
   }
 

@@ -66,7 +66,6 @@ const DataRoom = lazy(() => import('./pages/DataRoom'));
 const Images = lazy(() => import('./pages/Images'));
 const Networks = lazy(() => import('./pages/Networks'));
 const ToolLinks = lazy(() => import('./pages/ToolLinks'));
-const ToolLinksManage = lazy(() => import('./pages/ToolLinksManage'));
 const VirtualMachines = lazy(() => import('./pages/VirtualMachines'));
 const Volumes = lazy(() => import('./pages/Volumes'));
 const ComposeEditor = lazy(() => import('./pages/ComposeEditor'));
@@ -183,7 +182,6 @@ function App() {
                   <Route path="images" element={<SuspenseRoute><ProtectedRoute><Images /></ProtectedRoute></SuspenseRoute>} />
                   <Route path="networks" element={<SuspenseRoute><ProtectedRoute><Networks /></ProtectedRoute></SuspenseRoute>} />
                   <Route path="tool-links" element={<SuspenseRoute><ProtectedRoute><ToolLinks /></ProtectedRoute></SuspenseRoute>} />
-                  <Route path="tool-links-manage" element={<SuspenseRoute><ProtectedRoute><ToolLinksManage /></ProtectedRoute></SuspenseRoute>} />
                   <Route path="virtual-machines" element={<SuspenseRoute><ProtectedRoute><VirtualMachines /></ProtectedRoute></SuspenseRoute>} />
                   <Route path="volumes" element={<SuspenseRoute><ProtectedRoute><Volumes /></ProtectedRoute></SuspenseRoute>} />
                   <Route path="compose" element={<SuspenseRoute><ProtectedRoute><ComposeEditor /></ProtectedRoute></SuspenseRoute>} />

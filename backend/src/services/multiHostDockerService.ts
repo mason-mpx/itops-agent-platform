@@ -27,6 +27,10 @@ class MultiHostDockerService {
   private endpoints: Map<string, Docker> = new Map();
 
   constructor() {
+    // Tables and endpoints initialized via ensureTables() called from app.ts after DB ready
+  }
+
+  ensureTables() {
     this.initTables();
     this.loadEndpoints();
   }

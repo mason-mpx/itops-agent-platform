@@ -22,6 +22,10 @@ class VmSnapshotSchedulerService {
   private intervals: Map<string, NodeJS.Timeout> = new Map();
 
   constructor() {
+    // Tables and policies initialized via ensureTables() called from app.ts after DB ready
+  }
+
+  ensureTables() {
     this.initTables();
     this.loadPolicies();
   }

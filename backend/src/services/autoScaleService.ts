@@ -42,6 +42,10 @@ class AutoScaleService {
   private cooldowns: Map<string, number> = new Map();
 
   constructor() {
+    // Tables and checker initialized via init() called from app.ts after DB ready
+  }
+
+  ensureTables() {
     this.initTables();
     this.startChecker();
   }

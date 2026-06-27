@@ -33,6 +33,10 @@ interface RegistryImage {
 
 class RegistryService {
   constructor() {
+    // Tables initialized via ensureTables() called from app.ts after DB ready
+  }
+
+  ensureTables() {
     this.initTables();
   }
 

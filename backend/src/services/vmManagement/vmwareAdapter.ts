@@ -1,10 +1,13 @@
 /**
  * =============================================================================
- * 虚拟机管理 - VMware vSphere 适配器 (简化版)
+ * 虚拟机管理 - VMware vSphere REST API 适配器
  * =============================================================================
+ * 通过 vSphere REST API (非 SOAP) 管理 ESXi / vCenter 虚拟机
+ * 认证: POST /rest/com/vmware/cis/session 获取 session-id
  */
 
-import { BaseVMAdapter, VMAdapter } from './vmAdapter';
+import https from 'https';
+import { BaseVMAdapter } from './vmAdapter';
 import {
   VirtualMachine,
   VMStats,
@@ -22,46 +25,75 @@ import {
   ReconfigureVMRequest,
 } from '../../types/vmManagement';
 import { logger } from '../../utils/logger';
-import axios from 'axios';
-import https from 'https';
 
 export class VMwareAdapter extends BaseVMAdapter {
-  private baseUrl: string;
+  private host: string;
+  private port: number;
   private username: string;
   private password: string;
   private sessionId?: string;
-  private axiosInstance: any;
+  private baseUrl: string;
+  private httpsAgent: https.Agent;
 
   constructor(platformId: string, config: any) {
     super(platformId, config);
-    this.baseUrl = `https://${config.host || config.baseUrl || ''}`;
-    this.username = config.username;
-    this.password = config.password;
-    
-    // 创建忽略证书验证的axios实例（企业环境可能有自签名证书）
-    this.axiosInstance = axios.create({
-      httpsAgent: new https.Agent({
-        rejectUnauthorized: false
-      }),
-      timeout: 30000
+    this.host = config.host || config.baseUrl || '';
+    this.port = config.port || 443;
+    this.username = config.username || '';
+    this.password = config.password || '';
+    this.baseUrl = this.host.startsWith('https://')
+      ? this.host
+      : `https://${this.host}:${this.port}`;
+
+    this.httpsAgent = new https.Agent({
+      rejectUnauthorized: false,
+      keepAlive: true,
     });
   }
 
+  // ==========================================================================
+  // 连接管理
+  // ==========================================================================
+
   async connect(): Promise<void> {
     try {
-      logger.info(`🔌 正在连接VMware vSphere`);
-      
-      // 简单的模拟连接 - 实际项目中使用govmomi或pyvmomi
-      this.connected = true;
-      logger.info('✅ VMware vSphere 连接成功');
+      logger.info(`🔌 正在连接 VMware vSphere: ${this.baseUrl}`);
+
+      if (!this.username || !this.password) {
+        throw new Error('VMware vSphere 用户名/密码未配置');
+      }
+
+      const auth = Buffer.from(`${this.username}:${this.password}`).toString('base64');
+      const result = await this.apiRequest(
+        'POST',
+        '/rest/com/vmware/cis/session',
+        null,
+        { Authorization: `Basic ${auth}` }
+      );
+
+      if (result && result.value) {
+        this.sessionId = result.value;
+        this.connected = true;
+        logger.info(`✅ VMware vSphere 会话已建立 (${this.host})`);
+      } else {
+        throw new Error('获取 vSphere session-id 失败');
+      }
     } catch (error) {
       logger.error('❌ VMware vSphere 连接失败:', error);
       this.connected = false;
+      this.sessionId = undefined;
       throw error;
     }
   }
 
   async disconnect(): Promise<void> {
+    if (this.sessionId) {
+      try {
+        await this.apiRequest('DELETE', '/rest/com/vmware/cis/session');
+      } catch {
+        // 忽略
+      }
+    }
     this.connected = false;
     this.sessionId = undefined;
     logger.info('🔌 VMware vSphere 已断开连接');
@@ -70,470 +102,485 @@ export class VMwareAdapter extends BaseVMAdapter {
   async testConnection(): Promise<boolean> {
     try {
       await this.connect();
+      await this.apiRequest('GET', '/rest/vcenter/vm');
       return true;
-    } catch (error) {
+    } catch {
       return false;
     } finally {
       await this.disconnect();
     }
   }
 
+  // ==========================================================================
+  // HTTPS 请求
+  // ==========================================================================
+
+  private apiRequest(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+    path: string,
+    body?: Record<string, any> | null,
+    extraHeaders?: Record<string, string>
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const urlObj = new URL(`${this.baseUrl}${path}`);
+      const isBody = body && method !== 'GET';
+      const bodyStr = isBody ? JSON.stringify(body) : undefined;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+
+      if (this.sessionId) {
+        headers['vmware-api-session-id'] = this.sessionId;
+      }
+
+      if (extraHeaders) {
+        Object.assign(headers, extraHeaders);
+      }
+
+      const options: https.RequestOptions = {
+        hostname: urlObj.hostname,
+        port: urlObj.port || 443,
+        path: urlObj.pathname + urlObj.search,
+        method,
+        headers,
+        agent: this.httpsAgent,
+        timeout: 30000,
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 204 || data.length === 0) {
+              resolve(null); return;
+            }
+            const parsed = JSON.parse(data);
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(parsed);
+            } else {
+              reject(new Error(parsed.value?.messages?.[0]?.default_message || `HTTP ${res.statusCode}`));
+            }
+          } catch {
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(data);
+            } else {
+              reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
+            }
+          }
+        });
+      });
+
+      req.on('error', (err) => reject(new Error(`VMware API 请求失败: ${err.message}`)));
+      req.on('timeout', () => { req.destroy(); reject(new Error('VMware API 请求超时 (30s)')); });
+      if (bodyStr) req.write(bodyStr);
+      req.end();
+    });
+  }
+
+  // ==========================================================================
+  // 虚拟机管理
+  // ==========================================================================
+
   async listVMs(): Promise<VirtualMachine[]> {
     if (!this.connected) await this.connect();
-    
-    // 模拟数据 - 实际项目中通过API获取
-    logger.info('📋 获取VMware虚拟机列表');
-    
-    // 这里只是演示结构
-    const mockVMs: VirtualMachine[] = [
-      {
-        id: 'vm-1',
-        name: 'web-server-01',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        status: 'running',
-        powerState: 'poweredOn',
-        guestOs: 'CentOS 7',
-        memoryMB: 4096,
-        numCPUs: 2,
-        ipAddress: '192.168.1.101',
-        hostName: 'web-server-01',
-        datacenter: 'DC1',
-        host: 'esxi-01.example.com',
-        disks: [
-          { id: 'disk-1', name: 'Hard disk 1', sizeGB: 40, type: 'thin' }
-        ],
-        networkInterfaces: [
-          { id: 'nic-1', name: 'Network adapter 1', macAddress: '00:50:56:a1:00:01', ipAddress: ['192.168.1.101'], connected: true }
-        ],
-        createdAt: '2024-01-15T10:00:00Z',
-        updatedAt: '2024-06-17T02:30:00Z'
-      },
-      {
-        id: 'vm-2',
-        name: 'db-server-01',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        status: 'stopped',
-        powerState: 'poweredOff',
-        guestOs: 'Ubuntu 20.04',
-        memoryMB: 8192,
-        numCPUs: 4,
-        datacenter: 'DC1',
-        host: 'esxi-02.example.com',
-        disks: [
-          { id: 'disk-2', name: 'Hard disk 1', sizeGB: 100, type: 'thick' },
-          { id: 'disk-3', name: 'Hard disk 2', sizeGB: 500, type: 'thick' }
-        ],
-        networkInterfaces: [
-          { id: 'nic-2', name: 'Network adapter 1', macAddress: '00:50:56:a1:00:02', connected: true }
-        ],
-        createdAt: '2024-02-20T15:00:00Z',
-        updatedAt: '2024-06-16T18:00:00Z'
-      }
-    ];
-    
-    return mockVMs;
+    logger.info('📋 获取 VMware 虚拟机列表');
+    try {
+      const result = await this.apiRequest('GET', '/rest/vcenter/vm');
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      const vms = await Promise.all(
+        result.value.map(async (s: any) => {
+          try {
+            const d = await this.apiRequest('GET', `/rest/vcenter/vm/${s.vm}`);
+            return this.mapVM(s.vm, d?.value || s);
+          } catch {
+            return this.mapVM(s.vm, s);
+          }
+        })
+      );
+      return vms;
+    } catch (error) {
+      logger.error('❌ 获取 VMware 虚拟机列表失败:', error);
+      throw error;
+    }
   }
 
   async getVM(vmId: string): Promise<VirtualMachine | null> {
     if (!this.connected) await this.connect();
-    logger.info(`📋 获取VMware虚拟机详情`);
-    
-    const vms = await this.listVMs();
-    return vms.find(vm => vm.id === vmId) || null;
+    try {
+      const detail = await this.apiRequest('GET', `/rest/vcenter/vm/${vmId}`);
+      if (!detail?.value) return null;
+      return this.mapVM(vmId, detail.value);
+    } catch (error) {
+      logger.error(`❌ 获取 VMware 虚拟机 ${vmId} 详情失败:`, error);
+      return null;
+    }
   }
 
   async createVM(request: CreateVMRequest): Promise<VirtualMachine> {
     if (!this.connected) await this.connect();
-    logger.info(`🚀 创建VMware虚拟机`);
-    
-    // 模拟创建
-    const mockVM: VirtualMachine = {
-      id: `vm-${Date.now()}`,
-      name: request.name,
-      hypervisorType: 'vmware',
-      hypervisorId: this.platformId,
-      status: 'stopped',
-      powerState: 'poweredOff',
-      memoryMB: request.config.memoryMB,
-      numCPUs: request.config.numCPUs,
-      disks: request.config.disks,
-      networkInterfaces: request.config.networkInterfaces,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+    const body: Record<string, any> = {
+      spec: {
+        name: request.name,
+        guest_OS: 'OTHER_LINUX_64',
+        memory: { size_MiB: request.config.memoryMB },
+        cpu: { count: request.config.numCPUs },
+        boot: { type: 'BIOS' },
+      },
     };
-    
-    if (request.powerOn) {
-      mockVM.status = 'running';
-      mockVM.powerState = 'poweredOn';
+    if (request.datastoreId) body.spec.placement = { datastore: request.datastoreId };
+    try {
+      const result = await this.apiRequest('POST', '/rest/vcenter/vm', body);
+      if (!result?.value) throw new Error('创建虚拟机失败：未返回 VM ID');
+      if (request.powerOn) {
+        try { await this.powerOnVM(result.value); } catch (e) { logger.warn('⚠️ 创建后启动失败:', e); }
+      }
+      return {
+        id: result.value, name: request.name, hypervisorType: 'vmware', hypervisorId: this.platformId,
+        status: request.powerOn ? 'running' : 'stopped',
+        powerState: request.powerOn ? 'poweredOn' : 'poweredOff',
+        memoryMB: request.config.memoryMB, numCPUs: request.config.numCPUs,
+        disks: request.config.disks, networkInterfaces: request.config.networkInterfaces,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      logger.error('❌ 创建 VMware 虚拟机失败:', error);
+      throw error;
     }
-    
-    return mockVM;
   }
 
   async cloneVM(request: CloneVMRequest): Promise<VirtualMachine> {
     if (!this.connected) await this.connect();
-    logger.info(`📋 克隆VMware虚拟机`);
-    
     const sourceVM = await this.getVM(request.vmId);
-    if (!sourceVM) {
-      throw new Error('源虚拟机不存在');
+    if (!sourceVM) throw new Error('源虚拟机不存在');
+    try {
+      const result = await this.apiRequest('POST', '/rest/vcenter/vm?action=clone', {
+        spec: { name: request.name, source: request.vmId },
+      });
+      if (!result?.value) throw new Error('克隆失败：未返回 VM ID');
+      if (request.powerOn) {
+        try { await this.powerOnVM(result.value); } catch { logger.warn('⚠️ 克隆后启动失败'); }
+      }
+      return {
+        ...sourceVM, id: result.value, name: request.name,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        powerState: request.powerOn ? 'poweredOn' : 'poweredOff',
+        status: request.powerOn ? 'running' : 'stopped',
+      };
+    } catch (error) {
+      logger.error('❌ 克隆 VMware 虚拟机失败:', error);
+      throw error;
     }
-    
-    const clonedVM: VirtualMachine = {
-      ...sourceVM,
-      id: `vm-${Date.now()}`,
-      name: request.name,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      powerState: request.powerOn ? 'poweredOn' : 'poweredOff',
-      status: request.powerOn ? 'running' : 'stopped'
-    };
-    
-    return clonedVM;
   }
 
   async deleteVM(vmId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🗑️ 删除VMware虚拟机`);
-    // 模拟删除
+    try {
+      await this.apiRequest('DELETE', `/rest/vcenter/vm/${vmId}`);
+    } catch (error) {
+      logger.error(`❌ 删除 VMware 虚拟机 ${vmId} 失败:`, error);
+      throw error;
+    }
   }
+
+  // ==========================================================================
+  // 电源操作
+  // ==========================================================================
 
   async powerOnVM(vmId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🔌 启动VMware虚拟机`);
-    // 模拟电源操作
+    await this.apiRequest('POST', `/rest/vcenter/vm/${vmId}/power/start`);
   }
 
   async powerOffVM(vmId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🔌 关闭VMware虚拟机`);
-    // 模拟电源操作
+    await this.apiRequest('POST', `/rest/vcenter/vm/${vmId}/power/stop`);
   }
 
   async restartVM(vmId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🔄 重启VMware虚拟机`);
-    // 模拟重启
+    await this.apiRequest('POST', `/rest/vcenter/vm/${vmId}/power/reset`);
   }
 
   async suspendVM(vmId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`⏸️ 挂起VMware虚拟机`);
-    // 模拟挂起
+    await this.apiRequest('POST', `/rest/vcenter/vm/${vmId}/power/suspend`);
   }
 
   async pauseVM(vmId: string): Promise<void> {
-    if (!this.connected) await this.connect();
-    logger.info(`⏸️ 暂停VMware虚拟机`);
-    // 模拟暂停
+    await this.suspendVM(vmId);
   }
 
   async resumeVM(vmId: string): Promise<void> {
-    if (!this.connected) await this.connect();
-    logger.info(`▶️ 恢复VMware虚拟机`);
-    // 模拟恢复
+    await this.powerOnVM(vmId);
   }
+
+  // ==========================================================================
+  // 快照管理
+  // ==========================================================================
 
   async listSnapshots(vmId: string): Promise<VMSnapshot[]> {
     if (!this.connected) await this.connect();
-    logger.info(`📋 获取VMware虚拟机快照列表`);
-    
-    return [
-      {
-        id: 'snap-1',
-        name: 'Initial state',
-        description: '虚拟机初始状态',
-        createdAt: '2024-06-01T10:00:00Z',
-        isCurrent: false,
-        childrenIds: ['snap-2']
-      },
-      {
-        id: 'snap-2',
-        name: 'After software update',
-        description: '软件更新后的状态',
-        createdAt: '2024-06-15T14:00:00Z',
-        isCurrent: true,
-        parentId: 'snap-1',
-        childrenIds: []
-      }
-    ];
+    try {
+      const result = await this.apiRequest('GET', `/rest/vcenter/vm/${vmId}/snapshots`);
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      return result.value.map((s: any) => ({
+        id: s.snapshot, name: s.name || s.snapshot,
+        description: s.description || '', createdAt: s.creation_date || new Date().toISOString(),
+        isCurrent: s.state === 'active', parentId: undefined, childrenIds: [],
+      }));
+    } catch (error) {
+      logger.error(`❌ 获取 VMware 快照列表(${vmId})失败:`, error);
+      return [];
+    }
   }
 
   async createSnapshot(request: CreateSnapshotRequest): Promise<VMSnapshot> {
     if (!this.connected) await this.connect();
-    logger.info(`📸 创建VMware虚拟机快照`);
-    
-    return {
-      id: `snap-${Date.now()}`,
-      name: request.name,
-      description: request.description,
-      createdAt: new Date().toISOString(),
-      isCurrent: true,
-      childrenIds: []
-    };
+    try {
+      const result = await this.apiRequest('POST', `/rest/vcenter/vm/${request.vmId}/snapshots`, {
+        name: request.name, description: request.description || '',
+        memory: request.includeMemory !== false,
+      });
+      return {
+        id: result?.value || `snap-${Date.now()}`, name: request.name,
+        description: request.description || '', createdAt: new Date().toISOString(),
+        isCurrent: true, childrenIds: [],
+      };
+    } catch (error) {
+      logger.error(`❌ 创建 VMware 快照(${request.vmId})失败:`, error);
+      throw error;
+    }
   }
 
   async restoreSnapshot(request: RestoreSnapshotRequest): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`⏮️ 恢复VMware虚拟机快照`);
-    // 模拟恢复
+    await this.apiRequest(
+      'POST',
+      `/rest/vcenter/vm/${request.vmId}/snapshots/${request.snapshotId}?action=restore`
+    );
   }
 
   async deleteSnapshot(snapshotId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🗑️ 删除VMware虚拟机快照`);
-    // 模拟删除
+    const vms = await this.listVMs();
+    for (const vm of vms) {
+      const snaps = await this.listSnapshots(vm.id);
+      if (snaps.some((s) => s.id === snapshotId)) {
+        await this.apiRequest('DELETE', `/rest/vcenter/vm/${vm.id}/snapshots/${snapshotId}`);
+        return;
+      }
+    }
+    logger.warn(`⚠️ 未找到 VMware 快照 ${snapshotId}`);
   }
+
+  // ==========================================================================
+  // 模板管理
+  // ==========================================================================
 
   async listTemplates(): Promise<VMTemplate[]> {
     if (!this.connected) await this.connect();
-    logger.info('📋 获取VMware模板列表');
-    
-    return [
-      {
-        id: 'template-1',
-        name: 'CentOS 7 Base',
-        description: 'CentOS 7 基础模板',
-        hypervisorType: 'vmware',
-        guestOs: 'CentOS 7',
-        memoryMB: 2048,
-        numCPUs: 2,
-        disks: [
-          { id: 'disk-t1', name: 'Hard disk 1', sizeGB: 40, type: 'thin' }
-        ],
-        networkInterfaces: [
-          { id: 'nic-t1', name: 'Network adapter 1', connected: true }
-        ],
-        createdAt: '2024-01-01T00:00:00Z'
-      },
-      {
-        id: 'template-2',
-        name: 'Ubuntu 20.04 Base',
-        description: 'Ubuntu 20.04 基础模板',
-        hypervisorType: 'vmware',
-        guestOs: 'Ubuntu 20.04',
-        memoryMB: 2048,
-        numCPUs: 2,
-        disks: [
-          { id: 'disk-t2', name: 'Hard disk 1', sizeGB: 50, type: 'thin' }
-        ],
-        networkInterfaces: [
-          { id: 'nic-t2', name: 'Network adapter 1', connected: true }
-        ],
-        createdAt: '2024-02-01T00:00:00Z'
-      }
-    ];
+    try {
+      const result = await this.apiRequest('GET', '/rest/vcenter/vm-template');
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      return result.value.map((t: any) => ({
+        id: t.template, name: t.name, description: t.description || '',
+        hypervisorType: 'vmware' as const, guestOs: t.guest_OS || undefined,
+        memoryMB: t.memory_size_MiB || 0, numCPUs: t.cpu_count || 0,
+        disks: [], networkInterfaces: [], createdAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      logger.error('❌ 获取 VMware 模板列表失败:', error);
+      return [];
+    }
   }
 
   async createTemplate(vmId: string, name: string, description?: string): Promise<VMTemplate> {
     if (!this.connected) await this.connect();
-    logger.info(`📋 创建VMware模板`);
-    
     const sourceVM = await this.getVM(vmId);
-    if (!sourceVM) {
-      throw new Error('源虚拟机不存在');
+    if (!sourceVM) throw new Error('源虚拟机不存在');
+    try {
+      const result = await this.apiRequest('POST', '/rest/vcenter/vm-template', {
+        spec: { source_vm: vmId, name, description: description || '' },
+      });
+      return {
+        id: result?.value || vmId, name, description,
+        hypervisorType: 'vmware', guestOs: sourceVM.guestOs,
+        memoryMB: sourceVM.memoryMB, numCPUs: sourceVM.numCPUs,
+        disks: sourceVM.disks, networkInterfaces: sourceVM.networkInterfaces,
+        createdAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      logger.error('❌ 创建 VMware 模板失败:', error);
+      throw error;
     }
-    
-    return {
-      id: `template-${Date.now()}`,
-      name,
-      description,
-      hypervisorType: 'vmware',
-      guestOs: sourceVM.guestOs,
-      memoryMB: sourceVM.memoryMB,
-      numCPUs: sourceVM.numCPUs,
-      disks: sourceVM.disks,
-      networkInterfaces: sourceVM.networkInterfaces,
-      createdAt: new Date().toISOString()
-    };
   }
 
   async deleteTemplate(templateId: string): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🗑️ 删除VMware模板`);
-    // 模拟删除
+    await this.apiRequest('DELETE', `/rest/vcenter/vm-template/${templateId}`);
   }
+
+  // ==========================================================================
+  // 监控统计
+  // ==========================================================================
 
   async getVMStats(vmId: string): Promise<VMStats> {
     if (!this.connected) await this.connect();
-    logger.info(`📊 获取VMware虚拟机状态`);
-    
+    const detail = await this.apiRequest('GET', `/rest/vcenter/vm/${vmId}`);
+    const vm = detail?.value || {};
+    const memSize = vm.memory?.size_MiB || 0;
+    const memPct = vm.memory?.usage_percent || 0;
     return {
-      cpuUsagePercent: Math.floor(Math.random() * 60) + 10,
-      memoryUsagePercent: Math.floor(Math.random() * 50) + 20,
-      memoryUsageMB: 2048,
-      memoryTotalMB: 4096,
-      diskUsageBytes: 1024 * 1024 * 1024 * 20,
-      diskTotalBytes: 1024 * 1024 * 1024 * 40,
-      networkTxBytes: Math.floor(Math.random() * 100000000),
-      networkRxBytes: Math.floor(Math.random() * 100000000),
-      uptimeSeconds: 86400 * 5,
-      snapshotCount: 2
+      cpuUsagePercent: vm.cpu?.usage_percent || 0,
+      memoryUsagePercent: memPct,
+      memoryUsageMB: Math.round((memSize * memPct) / 100),
+      memoryTotalMB: memSize,
+      diskUsageBytes: 0, diskTotalBytes: 0,
+      networkTxBytes: 0, networkRxBytes: 0,
+      uptimeSeconds: 0, snapshotCount: 0,
     };
   }
 
+  // ==========================================================================
+  // 配置与迁移
+  // ==========================================================================
+
   async reconfigureVM(request: ReconfigureVMRequest): Promise<VirtualMachine> {
     if (!this.connected) await this.connect();
-    logger.info(`⚙️ 重新配置VMware虚拟机`);
-    
-    const vm = await this.getVM(request.vmId);
-    if (!vm) {
-      throw new Error('虚拟机不存在');
+    const spec: Record<string, any> = {};
+    if (request.memoryMB !== undefined) spec.memory = { size_MiB: request.memoryMB };
+    if (request.numCPUs !== undefined) spec.cpu = { count: request.numCPUs };
+    if (Object.keys(spec).length > 0) {
+      await this.apiRequest('PATCH', `/rest/vcenter/vm/${request.vmId}`, { spec });
     }
-    
-    const updatedVM = { ...vm, updatedAt: new Date().toISOString() };
-    if (request.memoryMB !== undefined) updatedVM.memoryMB = request.memoryMB;
-    if (request.numCPUs !== undefined) updatedVM.numCPUs = request.numCPUs;
-    if (request.numCoresPerSocket !== undefined) updatedVM.numCoresPerSocket = request.numCoresPerSocket;
-    
-    return updatedVM;
+    const vm = await this.getVM(request.vmId);
+    if (!vm) throw new Error('虚拟机不存在');
+    return { ...vm, updatedAt: new Date().toISOString() };
   }
 
   async migrateVM(request: MigrateVMRequest): Promise<void> {
     if (!this.connected) await this.connect();
-    logger.info(`🚚 迁移VMware虚拟机`);
-    // 模拟迁移
+    await this.apiRequest('POST', `/rest/vcenter/vm/${request.vmId}?action=migrate`, {
+      spec: {
+        host: request.targetHostId || undefined,
+        datastore: request.targetDatastoreId || undefined,
+      },
+    });
   }
+
+  // ==========================================================================
+  // 主机管理
+  // ==========================================================================
 
   async listHosts(): Promise<HypervisorHost[]> {
     if (!this.connected) await this.connect();
-    logger.info('📋 获取VMware主机列表');
-    
-    return [
-      {
-        id: 'host-1',
-        name: 'esxi-01.example.com',
-        hypervisorType: 'vmware',
-        status: 'connected',
-        ipAddress: '192.168.1.51',
-        vendor: 'Dell',
-        model: 'PowerEdge R750',
-        numCpus: 32,
-        cpuMhz: 2600,
-        memoryTotalMB: 262144,
-        memoryUsageMB: 131072,
-        datastores: ['datastore1', 'datastore2'],
-        networks: ['VM Network', 'VM Network 2'],
-        numVMs: 15,
-        numRunningVMs: 12,
-        version: '7.0 U3'
-      },
-      {
-        id: 'host-2',
-        name: 'esxi-02.example.com',
-        hypervisorType: 'vmware',
-        status: 'connected',
-        ipAddress: '192.168.1.52',
-        vendor: 'HP',
-        model: 'ProLiant DL380',
-        numCpus: 24,
-        cpuMhz: 2400,
-        memoryTotalMB: 196608,
-        memoryUsageMB: 98304,
-        datastores: ['datastore1', 'datastore3'],
-        networks: ['VM Network', 'VM Network 2'],
-        numVMs: 12,
-        numRunningVMs: 10,
-        version: '6.7 U3'
-      }
-    ];
+    try {
+      const result = await this.apiRequest('GET', '/rest/vcenter/host');
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      return result.value.map((h: any) => ({
+        id: h.host, name: h.name, hypervisorType: 'vmware' as const,
+        status: h.connection_state === 'CONNECTED' ? ('connected' as const) : ('disconnected' as const),
+        ipAddress: '', numCpus: 0, cpuMhz: 0, memoryTotalMB: 0, memoryUsageMB: 0,
+        numVMs: 0, numRunningVMs: 0, version: undefined,
+      }));
+    } catch (error) {
+      logger.error('❌ 获取 VMware 主机列表失败:', error);
+      return [];
+    }
   }
 
   async getHost(hostId: string): Promise<HypervisorHost | null> {
-    if (!this.connected) await this.connect();
     const hosts = await this.listHosts();
-    return hosts.find(h => h.id === hostId) || null;
+    return hosts.find((h) => h.id === hostId) || null;
   }
+
+  // ==========================================================================
+  // 数据存储
+  // ==========================================================================
 
   async listDatastores(): Promise<Datastore[]> {
     if (!this.connected) await this.connect();
-    logger.info('📋 获取VMware数据存储列表');
-    
-    return [
-      {
-        id: 'ds-1',
-        name: 'datastore1',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        type: 'vmfs',
-        capacityBytes: 1099511627776,
-        freeBytes: 549755813888,
-        usedBytes: 549755813888,
-        accessible: true
-      },
-      {
-        id: 'ds-2',
-        name: 'datastore2',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        type: 'nfs',
-        capacityBytes: 2199023255552,
-        freeBytes: 1649267441664,
-        usedBytes: 549755813888,
-        accessible: true
-      }
-    ];
+    try {
+      const result = await this.apiRequest('GET', '/rest/vcenter/datastore');
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      return result.value.map((ds: any) => ({
+        id: ds.datastore, name: ds.name, hypervisorType: 'vmware' as const, hypervisorId: this.platformId,
+        type: ds.type === 'NFS' ? ('nfs' as const) : ('vmfs' as const),
+        capacityBytes: ds.capacity || 0, freeBytes: ds.free_space || 0,
+        usedBytes: (ds.capacity || 0) - (ds.free_space || 0),
+        accessible: ds.accessible !== false,
+      }));
+    } catch (error) {
+      logger.error('❌ 获取 VMware 数据存储列表失败:', error);
+      return [];
+    }
   }
 
   async getDatastore(datastoreId: string): Promise<Datastore | null> {
-    if (!this.connected) await this.connect();
     const datastores = await this.listDatastores();
-    return datastores.find(d => d.id === datastoreId) || null;
+    return datastores.find((d) => d.id === datastoreId) || null;
   }
+
+  // ==========================================================================
+  // 网络管理
+  // ==========================================================================
 
   async listNetworks(): Promise<VirtualNetwork[]> {
     if (!this.connected) await this.connect();
-    logger.info('📋 获取VMware网络列表');
-    
-    return [
-      {
-        id: 'net-1',
-        name: 'VM Network',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        type: 'standard',
-        portGroup: 'VM Network',
-        numPorts: 120,
-        numUsedPorts: 15
-      },
-      {
-        id: 'net-2',
-        name: 'VM Network 2',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        type: 'standard',
-        vlanId: 100,
-        portGroup: 'VM Network 2',
-        numPorts: 120,
-        numUsedPorts: 8
-      }
-    ];
+    try {
+      const result = await this.apiRequest('GET', '/rest/vcenter/network');
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      return result.value.map((net: any) => ({
+        id: net.network, name: net.name, hypervisorType: 'vmware' as const, hypervisorId: this.platformId,
+        type: net.type === 'DISTRIBUTED_PORTGROUP' ? ('distributed' as const) : ('standard' as const),
+      }));
+    } catch (error) {
+      logger.error('❌ 获取 VMware 网络列表失败:', error);
+      return [];
+    }
   }
+
+  // ==========================================================================
+  // 资源池
+  // ==========================================================================
 
   async listResourcePools(): Promise<ResourcePool[]> {
     if (!this.connected) await this.connect();
-    logger.info('📋 获取VMware资源池列表');
-    
-    return [
-      {
-        id: 'rp-1',
-        name: 'Resources',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        cpuShares: 1000,
-        memoryShares: 1000
-      },
-      {
-        id: 'rp-2',
-        name: 'Production',
-        hypervisorType: 'vmware',
-        hypervisorId: this.platformId,
-        parentId: 'rp-1',
-        cpuShares: 2000,
-        memoryShares: 2000
-      }
-    ];
+    try {
+      const result = await this.apiRequest('GET', '/rest/vcenter/resource-pool');
+      if (!result?.value || !Array.isArray(result.value)) return [];
+      return result.value.map((rp: any) => ({
+        id: rp.resource_pool, name: rp.name, hypervisorType: 'vmware' as const, hypervisorId: this.platformId,
+      }));
+    } catch (error) {
+      logger.error('❌ 获取 VMware 资源池列表失败:', error);
+      return [];
+    }
+  }
+
+  // ==========================================================================
+  // 辅助映射
+  // ==========================================================================
+
+  private mapVM(vmId: string, vm: any): VirtualMachine {
+    const ps = vm.power_state;
+    let powerState: 'poweredOn' | 'poweredOff' | 'suspended' | 'unknown' = 'unknown';
+    let status: 'running' | 'stopped' | 'paused' | 'suspended' | 'unknown' = 'unknown';
+    switch (ps) {
+      case 'POWERED_ON': powerState = 'poweredOn'; status = 'running'; break;
+      case 'POWERED_OFF': powerState = 'poweredOff'; status = 'stopped'; break;
+      case 'SUSPENDED': powerState = 'suspended'; status = 'suspended'; break;
+    }
+    return {
+      id: vmId, name: vm.name || `vm-${vmId}`,
+      hypervisorType: 'vmware', hypervisorId: this.platformId,
+      status, powerState, guestOs: vm.guest_OS || undefined,
+      memoryMB: vm.memory?.size_MiB || 0, numCPUs: vm.cpu?.count || 0,
+      disks: [], networkInterfaces: [],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
   }
 }

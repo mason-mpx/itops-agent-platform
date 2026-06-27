@@ -78,6 +78,13 @@ import { queueService } from './services/queueService';
 import { alertAutoResponseService } from './services/alertAutoResponse/alertAutoResponseService';
 import { dockerService } from './services/dockerService';
 import { configTemplateService } from './services/configTemplateService';
+import { composeService } from './services/composeService';
+import { registryService } from './services/registryService';
+import { kubernetesService } from './services/kubernetesService';
+import { autoScaleService } from './services/autoScaleService';
+import { vmMigrationService } from './services/vmMigrationService';
+import { vmSnapshotSchedulerService } from './services/vmSnapshotSchedulerService';
+import { multiHostDockerService } from './services/multiHostDockerService';
 import importExportRouter from './routes/importExportRoutes';
 import alertAutoRouter from './routes/alertAutoRoutes';
 import linkageRouter from './routes/linkageRoutes';
@@ -187,6 +194,15 @@ async function initializeApp() {
   
   // Initialize config template service
   configTemplateService.init();
+
+  // Initialize P0-P3 container & VM management services (ensure DB tables)
+  composeService.ensureTables();
+  registryService.ensureTables();
+  kubernetesService.ensureTables();
+  autoScaleService.ensureTables();
+  vmMigrationService.ensureTables();
+  vmSnapshotSchedulerService.ensureTables();
+  multiHostDockerService.ensureTables();
   
   initTokenBlacklist();
   startCircuitBreakerCleanup();

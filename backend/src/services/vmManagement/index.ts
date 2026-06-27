@@ -28,6 +28,7 @@ import {
 import { VMAdapter } from './vmAdapter';
 import { VMwareAdapter } from './vmwareAdapter';
 import { KVMAdapter } from './kvmAdapter';
+import { ProxmoxAdapter } from './proxmoxAdapter';
 import { credentialService } from '../credentialService';
 
 export class VMManagementService {
@@ -101,6 +102,8 @@ export class VMManagementService {
         adapter = new KVMAdapter(platformId, config);
         break;
       case 'proxmox':
+        adapter = new ProxmoxAdapter(platformId, config);
+        break;
       case 'hyperv':
       case 'ovirt':
       case 'cloud':

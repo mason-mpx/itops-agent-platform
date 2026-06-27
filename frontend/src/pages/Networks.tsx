@@ -1,10 +1,17 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Network, Trash2, Plus, Search, RefreshCw, Globe,
+  Network, Trash2, Plus, Search, RefreshCw, Globe, Server,
 } from 'lucide-react';
 import api from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
+
+interface Endpoint {
+  id: string;
+  name: string;
+  host: string;
+  status: string;
+}
 
 interface DockerNetwork {
   id: string;
@@ -30,19 +37,38 @@ interface DockerNetwork {
   created: string;
 }
 
+const DRIVERS = ['bridge', 'host', 'overlay', 'macvlan', 'ipvlan', 'none'] as const;
+
 export default function Networks() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedEndpoint, setSelectedEndpoint] = useState('local');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newNetworkName, setNewNetworkName] = useState('');
   const [newNetworkDriver, setNewNetworkDriver] = useState('bridge');
+  const [newNetworkSubnet, setNewNetworkSubnet] = useState('');
+  const [newNetworkGateway, setNewNetworkGateway] = useState('');
+
+  // 获取可用端点
+  const { data: endpoints = [] } = useQuery<Endpoint[]>({
+    queryKey: ['docker-endpoints'],
+    queryFn: async () => {
+      const response = await api.get('/api/containers/hosts');
+      return response.data.data as Endpoint[];
+    },
+    staleTime: 60000,
+  });
 
   // 获取网络列表
-  const { data: networksData, isLoading, error } = useQuery({
-    queryKey: ['docker-networks'],
+  const { data: networksData, isLoading, error } = useQuery<DockerNetwork[]>({
+    queryKey: ['docker-networks', selectedEndpoint],
     queryFn: async () => {
-      const response = await api.get('/api/docker/networks');
+      const params: Record<string, string> = {};
+      if (selectedEndpoint !== 'local') {
+        params.endpointId = selectedEndpoint;
+      }
+      const response = await api.get('/api/containers/networks/list', { params });
       return response.data.data as DockerNetwork[];
     },
     refetchInterval: 30000,
@@ -52,9 +78,15 @@ export default function Networks() {
 
   // 删除网络
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/api/docker/networks/${id}`),
+    mutationFn: (id: string) => {
+      const params: Record<string, string> = {};
+      if (selectedEndpoint !== 'local') {
+        params.endpointId = selectedEndpoint;
+      }
+      return api.delete(`/api/containers/networks/${id}`, { params });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['docker-networks'] });
+      queryClient.invalidateQueries({ queryKey: ['docker-networks', selectedEndpoint] });
       toast.success('网络已删除');
     },
     onError: () => toast.error('删除网络失败'),
@@ -62,16 +94,26 @@ export default function Networks() {
 
   // 创建网络
   const createMutation = useMutation({
-    mutationFn: () => api.post('/api/docker/networks', {
-      name: newNetworkName,
-      driver: newNetworkDriver,
-    }),
+    mutationFn: () => {
+      const params: Record<string, string> = {};
+      if (selectedEndpoint !== 'local') {
+        params.endpointId = selectedEndpoint;
+      }
+      return api.post('/api/containers/networks', {
+        name: newNetworkName,
+        driver: newNetworkDriver,
+        subnet: newNetworkSubnet || undefined,
+        gateway: newNetworkGateway || undefined,
+      }, { params });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['docker-networks'] });
+      queryClient.invalidateQueries({ queryKey: ['docker-networks', selectedEndpoint] });
       toast.success('网络已创建');
       setShowCreateModal(false);
       setNewNetworkName('');
       setNewNetworkDriver('bridge');
+      setNewNetworkSubnet('');
+      setNewNetworkGateway('');
     },
     onError: () => toast.error('创建网络失败'),
   });
@@ -100,7 +142,7 @@ export default function Networks() {
           当前环境未连接 Docker 引擎，网络管理功能需要 Docker 运行环境支持。
         </p>
         <button
-          onClick={() => queryClient.invalidateQueries({ queryKey: ['docker-networks'] })}
+          onClick={() => queryClient.invalidateQueries({ queryKey: ['docker-networks', selectedEndpoint] })}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
@@ -112,15 +154,30 @@ export default function Networks() {
 
   return (
     <div className="space-y-6">
-      {/* 页面标题 */}
-      <div className="flex items-center justify-between">
+      {/* 页面标题 + 主机选择 */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">网络管理</h1>
           <p className="text-text-secondary mt-1">管理 Docker 网络</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* 主机选择器 */}
+          <div className="flex items-center gap-2">
+            <Server className="w-4 h-4 text-text-secondary" />
+            <select
+              value={selectedEndpoint}
+              onChange={(e) => setSelectedEndpoint(e.target.value)}
+              className="px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-blue-500"
+            >
+              {endpoints.map((ep) => (
+                <option key={ep.id} value={ep.id}>
+                  {ep.name} {ep.status !== 'active' ? '(离线)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['docker-networks'] })}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['docker-networks', selectedEndpoint] })}
             className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-text-primary rounded-lg flex items-center gap-2 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
@@ -277,6 +334,8 @@ export default function Networks() {
                   setShowCreateModal(false);
                   setNewNetworkName('');
                   setNewNetworkDriver('bridge');
+                  setNewNetworkSubnet('');
+                  setNewNetworkGateway('');
                 }}
                 className="text-text-secondary hover:text-text-primary"
               >
@@ -305,11 +364,34 @@ export default function Networks() {
                   onChange={(e) => setNewNetworkDriver(e.target.value)}
                   className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary focus:outline-none focus:border-blue-500"
                 >
-                  <option value="bridge">bridge</option>
-                  <option value="host">host</option>
-                  <option value="overlay">overlay</option>
-                  <option value="macvlan">macvlan</option>
+                  {DRIVERS.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-2">
+                  子网 (可选)
+                </label>
+                <input
+                  type="text"
+                  value={newNetworkSubnet}
+                  onChange={(e) => setNewNetworkSubnet(e.target.value)}
+                  placeholder="例如 172.20.0.0/16"
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-tertiary font-mono text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-2">
+                  网关 (可选)
+                </label>
+                <input
+                  type="text"
+                  value={newNetworkGateway}
+                  onChange={(e) => setNewNetworkGateway(e.target.value)}
+                  placeholder="例如 172.20.0.1"
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary placeholder-text-tertiary font-mono text-sm focus:outline-none focus:border-blue-500"
+                />
               </div>
               <div className="flex gap-2">
                 <button
@@ -317,6 +399,8 @@ export default function Networks() {
                     setShowCreateModal(false);
                     setNewNetworkName('');
                     setNewNetworkDriver('bridge');
+                    setNewNetworkSubnet('');
+                    setNewNetworkGateway('');
                   }}
                   className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-text-primary rounded-lg transition-colors"
                 >

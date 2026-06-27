@@ -24,6 +24,10 @@ class VmMigrationService {
   private progressIntervals: Map<string, NodeJS.Timeout> = new Map();
 
   constructor() {
+    // Tables initialized via ensureTables() called from app.ts after DB ready
+  }
+
+  ensureTables() {
     this.initTables();
   }
 

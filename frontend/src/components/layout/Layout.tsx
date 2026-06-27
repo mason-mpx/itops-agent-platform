@@ -105,12 +105,6 @@ const navigationGroups = [
       { name: 'nav.compose', href: '/compose', icon: Layers },
       { name: 'nav.snapshotPolicies', href: '/snapshot-policies', icon: Camera },
       { name: 'nav.imageRegistry', href: '/image-registry', icon: Package },
-    ]
-  },
-  {
-    name: 'nav.smartOps',
-    icon: TrendingUp,
-    items: [
       { name: 'nav.kubernetes', href: '/kubernetes', icon: Container },
       { name: 'nav.costAnalysis', href: '/cost-analysis', icon: DollarSign },
       { name: 'nav.autoScale', href: '/auto-scale', icon: TrendingUp },
@@ -181,7 +175,6 @@ const navigationGroups = [
       { name: 'nav.users', href: '/users', icon: Users },
       { name: 'nav.frontendTests', href: '/frontend-tests', icon: FlaskConical },
       { name: 'nav.toolLinks', href: '/tool-links', icon: Link2 },
-      { name: 'nav.toolLinksManage', href: '/tool-links-manage', icon: Wrench },
       { name: 'nav.settings', href: '/settings', icon: Settings },
     ]
   },
@@ -302,13 +295,13 @@ export default function Layout() {
               <button
                 onClick={() => toggleGroup(group.name)}
                 className={clsx(
-                  'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all duration-200 group',
+                  'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-semibold transition-all duration-200 group',
                   theme === 'dark'
-                    ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+                    ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                     : 'text-text-tertiary hover:text-gray-700 hover:bg-gray-100/50'
                 )}
               >
-                <group.icon className="w-3 h-3 flex-shrink-0" />
+                <group.icon className="w-3.5 h-3.5 flex-shrink-0" />
                 <span className="flex-1 text-left">{t(group.name)}</span>
                 {expandedGroups.has(group.name) ? (
                   <ChevronDown className="w-3 h-3 flex-shrink-0" />
